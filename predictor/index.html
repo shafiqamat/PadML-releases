@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PadML Predictor</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>PadML Predictor</h1>
+      <p class="tagline">Estimate pad compression outcomes from geometry</p>
+    </div>
+    <div class="model-picker">
+      <label for="model-select">Model</label>
+      <select id="model-select"></select>
+      <span id="model-family" class="pill"></span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <dialog id="login-dialog" aria-labelledby="login-title">
+    <form id="login-form" method="dialog">
+      <h2 id="login-title">Team password</h2>
+      <p class="hint">The predictor is shared with the team only. Ask a teammate for the password.</p>
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" autocomplete="current-password" required>
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <div class="actions"><button type="submit" class="primary">Continue</button></div>
+    </form>
+  </dialog>
+
+  <nav class="tabs" role="tablist" aria-label="Predictor sections">
+    <button role="tab" id="tab-design" aria-controls="panel-design" aria-selected="true">Design</button>
+    <button role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected="false" tabindex="-1">Upload DXF</button>
+    <button role="tab" id="tab-batch" aria-controls="panel-batch" aria-selected="false" tabindex="-1">Batch</button>
+    <button role="tab" id="tab-tested" aria-controls="panel-tested" aria-selected="false" tabindex="-1">Tested designs</button>
+    <button role="tab" id="tab-about" aria-controls="panel-about" aria-selected="false" tabindex="-1">About this model</button>
+  </nav>
+
+  <main>
+    <section id="panel-design" role="tabpanel" aria-labelledby="tab-design" class="panel">
+      <div class="design-grid">
+        <form id="design-form" class="card" novalidate>
+          <h2>Chevron parameters</h2>
+          <p class="hint">Left and right struts are mirrored. Angles are the leg's inner edge to the interface.
+            Widths are each leg's mean horizontal width.</p>
+          <div class="field-row">
+            <label for="load-reference">Start from a tested design</label>
+            <select id="load-reference"><option value="">Choose…</option></select>
+          </div>
+          <div id="param-fields"></div>
+          <div class="actions">
+            <button type="submit" class="primary">Estimate</button>
+            <button type="button" id="set-baseline">Set as baseline</button>
+            <button type="button" id="reset-params" class="ghost">Reset</button>
+          </div>
+          <p id="form-error" class="error" role="alert" hidden></p>
+        </form>
+
+        <div class="stack">
+          <div class="card preview-card">
+            <h2>Profile preview</h2>
+            <div id="preview" class="preview" role="img" aria-label="Pad profile preview"></div>
+            <p class="hint" id="preview-note">Material is shaded. The dashed line marks the apex height.</p>
+          </div>
+          <div class="card" aria-live="polite">
+            <h2>Estimate</h2>
+            <div id="design-result" class="result-empty">Enter parameters and choose Estimate.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Session history</h2>
+          <div>
+            <button type="button" id="export-history">Download CSV</button>
+            <button type="button" id="clear-history" class="ghost">Clear</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="history-table"><caption class="sr-only">Estimates made this session</caption></table></div>
+      </div>
+    </section>
+
+    <section id="panel-upload" role="tabpanel" aria-labelledby="tab-upload" class="panel" hidden>
+      <div class="design-grid">
+        <div class="card">
+          <h2>Upload a DXF profile</h2>
+          <p class="hint">A closed planar pad profile, like the Studio STEP-to-DXF output. Units come from the file's
+            $INSUNITS header.</p>
+          <label class="file-drop" for="dxf-input">
+            <span>Choose a .dxf file</span>
+            <input type="file" id="dxf-input" accept=".dxf">
+          </label>
+          <p id="upload-error" class="error" role="alert" hidden></p>
+          <div id="upload-params"></div>
+        </div>
+        <div class="stack">
+          <div class="card preview-card">
+            <h2>Uploaded profile</h2>
+            <div id="upload-preview" class="preview" role="img" aria-label="Uploaded profile"></div>
+          </div>
+          <div class="card" aria-live="polite">
+            <h2>Estimate</h2>
+            <div id="upload-result" class="result-empty">No file yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-batch" role="tabpanel" aria-labelledby="tab-batch" class="panel" hidden>
+      <div class="card">
+        <h2>Estimate many designs</h2>
+        <p class="hint">One row per design. Columns are the chevron parameters; blank cells use the defaults.
+          Up to 500 rows.</p>
+        <div class="actions">
+          <button type="button" id="download-template">Download template</button>
+          <label class="button" for="batch-file">Open CSV…</label>
+          <input type="file" id="batch-file" accept=".csv,text/csv" class="sr-only">
+        </div>
+        <label for="batch-text">Or paste CSV</label>
+        <textarea id="batch-text" rows="7" spellcheck="false"></textarea>
+        <div class="actions">
+          <button type="button" id="run-batch" class="primary">Estimate batch</button>
+          <button type="button" id="export-batch" disabled>Download results</button>
+        </div>
+        <p id="batch-error" class="error" role="alert" hidden></p>
+        <div class="table-wrap"><table id="batch-table"><caption class="sr-only">Batch estimates</caption></table></div>
+      </div>
+    </section>
+
+    <section id="panel-tested" role="tabpanel" aria-labelledby="tab-tested" class="panel" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>Tested designs</h2>
+          <button type="button" id="predict-tested">Compare model with measurements</button>
+        </div>
+        <p class="hint">Measured results from the lab data this model learned from. "Held-out test" designs were never
+          used for training or model selection, so they show honest errors. Training designs will look better
+          than new designs do.</p>
+        <div id="tested-curve-block" hidden>
+          <div class="field-row">
+            <label for="tested-curve-select">Measured vs predicted curve for</label>
+            <select id="tested-curve-select"></select>
+          </div>
+          <p class="hint">The prediction shown is out-of-fold: it comes from a model trained without this design
+            (or its replicates), so it shows how well a new design would be predicted.</p>
+          <div id="tested-curve"></div>
+        </div>
+        <div class="table-wrap"><table id="tested-table"><caption class="sr-only">Tested designs and measurements</caption></table></div>
+      </div>
+    </section>
+
+    <section id="panel-about" role="tabpanel" aria-labelledby="tab-about" class="panel" hidden>
+      <div class="card" id="about"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Estimates are statistical, from a small screening batch. Confirm important designs with a test.
+  </footer>
+</body>
+</html>
