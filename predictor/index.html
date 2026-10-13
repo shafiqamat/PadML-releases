@@ -37,6 +37,7 @@
 
   <nav class="tabs" role="tablist" aria-label="Predictor sections">
     <button role="tab" id="tab-design" aria-controls="panel-design" aria-selected="true">Design</button>
+    <button role="tab" id="tab-inverse" aria-controls="panel-inverse" aria-selected="false" tabindex="-1" hidden>Inverse design</button>
     <button role="tab" id="tab-upload" aria-controls="panel-upload" aria-selected="false" tabindex="-1">Upload DXF</button>
     <button role="tab" id="tab-batch" aria-controls="panel-batch" aria-selected="false" tabindex="-1">Batch</button>
     <button role="tab" id="tab-tested" aria-controls="panel-tested" aria-selected="false" tabindex="-1">Tested designs</button>
@@ -112,6 +113,45 @@
             <div id="upload-result" class="result-empty">No file yet.</div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section id="panel-inverse" role="tabpanel" aria-labelledby="tab-inverse" class="panel" hidden>
+      <div class="card">
+        <h2>Inverse design</h2>
+        <p class="hint">Find parameter combinations predicted to meet force and numeric length targets inside the tested parameter ranges.</p>
+        <p class="hint"><strong>Current Campaign 3 limit:</strong> Match scores rank predicted matches; they are not calibrated probabilities. "Likely achievable" is a screening label, not a validated chance that a build will hit your targets.</p>
+        <details id="inverse-limits">
+          <summary>Inverse design limits and how to read the results</summary>
+          <ul class="hint">
+            <li>Feasibility labels summarize cumulative held-out hit rates at the default force and length tolerances. Low score thresholds can label many candidates "likely"; that does not give the success rate of an individual candidate.</li>
+            <li>Energy-inclusive requests and changed tolerance settings have not been validated for these feasibility labels.</li>
+            <li>Typical length error is about 0.045 in; differences below about 0.09 in are not reliably resolved. Typical force error is about 3 lbf.</li>
+            <li>The displayed ±1.96σ ranges assume normal errors. They have not demonstrated 95% coverage, and the limited repeat-test data keep some uncertainty ranges wide.</li>
+            <li>These retrospective checks do not replace confirmation in a new screening. Untested combinations need CAD checks and physical testing.</li>
+          </ul>
+        </details>
+        <div class="field-row"><label for="inverse-force">Target force (lbf)</label><input id="inverse-force" type="number" step="any" value="35"></div>
+        <div class="field-row"><label for="inverse-length">Target length (in)</label><input id="inverse-length" type="number" step="any" value="0.55"></div>
+        <label class="inline"><input id="inverse-energy-enabled" type="checkbox"> Include target energy</label>
+        <div class="field-row"><label for="inverse-energy">Target energy (in·lbf)</label><input id="inverse-energy" type="number" step="any" disabled></div>
+        <div class="field-row"><label for="inverse-tol-force">Force tolerance (lbf)</label><input id="inverse-tol-force" type="number" step="any" value="3"></div>
+        <div class="field-row"><label for="inverse-tol-length">Length tolerance (in)</label><input id="inverse-tol-length" type="number" step="any" value="0.045"></div>
+        <div class="field-row"><label for="inverse-tol-energy">Energy tolerance (in·lbf)</label><input id="inverse-tol-energy" type="number" step="any" value="2"></div>
+        <div class="field-row"><label for="inverse-mode">Search</label><select id="inverse-mode"><option value="continuous">Continuous (manufacturing increments)</option><option value="tested_levels">Tested levels only</option></select></div>
+        <label class="inline"><input id="inverse-lock-interface" type="checkbox" checked> Lock interface thickness at 0.02 in (varied in Screening 1 only)</label>
+        <h3>Fix parameters (optional)</h3><div id="inverse-fixed"></div>
+        <div class="actions"><button type="button" class="primary" id="run-inverse">Search designs</button></div>
+        <p id="inverse-error" class="error" role="alert" hidden></p>
+        <div id="inverse-results" aria-live="polite"></div>
+      </div>
+      <div class="card">
+        <h2>Next tests</h2>
+        <p class="hint"><strong>Current default-request limit:</strong> At 35 lbf and 0.55 in, with interface thickness locked at 0.02 in, all candidates have the same estimated force and length uncertainty. Explore breaks ties by distance to the targets, and Balanced ranks like Exploit. Switching strategies may not give meaningfully different recommendations for this request.</p>
+        <div class="field-row"><label for="next-strategy">Strategy</label><select id="next-strategy"><option value="balanced">Balanced</option><option value="exploit">Exploit target</option><option value="explore">Explore uncertainty</option></select></div>
+        <div class="field-row"><label for="next-size">Batch size (1–10)</label><input id="next-size" type="number" min="1" max="10" value="5"></div>
+        <div class="actions"><button type="button" class="primary" id="run-next">Suggest next tests</button><button type="button" id="download-next" disabled>Download CSV</button></div>
+        <p id="next-error" class="error" role="alert" hidden></p><div id="next-results" aria-live="polite"></div>
       </div>
     </section>
 

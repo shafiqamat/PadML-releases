@@ -10,6 +10,7 @@ const state = {
   baseline: null,
   history: [],
   batchRows: [],
+  nextRows: [],
 };
 
 const GROUPS = [
@@ -694,10 +695,13 @@ async function selectModel(slug) {
   $("tab-upload").hidden = isDoe;
   $("tab-batch").hidden = isDoe;
   $("tab-tested").hidden = isDoe;
+  $("tab-inverse").hidden = !isDoe;
+  if (!isDoe && $("tab-inverse").getAttribute("aria-selected") === "true") $("tab-design").click();
   $("design-form").querySelector("#set-baseline").hidden = isDoe;
   $("design-form").querySelector("#reset-params").hidden = isDoe;
   $("session-card").hidden = isDoe;
   buildForm();
+  buildInverseFields();
   renderAbout(state.model);
   try {
     state.references = (await api(`/api/models/${encodeURIComponent(slug)}/references`)).references;
@@ -716,6 +720,94 @@ async function selectModel(slug) {
     $("tested-curve-select").replaceChildren(el("option", { value: "", text: "Choose a tested design…" }),
       ...state.references.map((r) => el("option", { value: r.design_id, text: r.design_id.replace("CHEVRON_SCREENING1_", "") })));
   }
+}
+
+function buildInverseFields() {
+  const host = $("inverse-fixed"); host.replaceChildren();
+  if (state.model?.input_kind !== "recurved_doe") return;
+  for (const name of state.model.parameter_order.filter((n) => n !== "extrusion_depth_in")) {
+    const bounds = state.model.input_ranges[name], id = `inverse-fix-${name}`;
+    const check = el("input", { type: "checkbox", id: `${id}-check` });
+    const value = el("input", { type: "number", id, min: bounds.min, max: bounds.max, step: name.endsWith("_deg") ? 1 : 0.0025, value: bounds.min, disabled: true });
+    check.addEventListener("change", () => { value.disabled = !check.checked; });
+    if (name === "interface_thickness_in") value.addEventListener("input", () => {
+      if (check.checked && Number(value.value) !== 0.02) $("inverse-lock-interface").checked = false;
+    });
+    host.append(el("div", { class: "field-row" }, el("label", { class: "inline", for: `${id}-check` }, check, name.replaceAll("_", " ")), value));
+  }
+}
+
+function inverseRequest() {
+  const number = (id) => { const v = Number($(id).value); if ($(id).value === "" || !Number.isFinite(v)) throw new Error(`${id.replaceAll("-", " ")} must be numeric.`); return v; };
+  const fixed_parameters = {};
+  for (const name of state.model.parameter_order) {
+    if (name === "extrusion_depth_in") continue;
+    if ($(`inverse-fix-${name}-check`).checked) fixed_parameters[name] = number(`inverse-fix-${name}`);
+  }
+  const body = { model: state.model.slug, target_force_lbf: number("inverse-force"), target_length_in: number("inverse-length"),
+    tol_force: number("inverse-tol-force"), tol_length: number("inverse-tol-length"), tol_energy: number("inverse-tol-energy"),
+    mode: $("inverse-mode").value, lock_interface_thickness: $("inverse-lock-interface").checked, fixed_parameters };
+  if ($("inverse-energy-enabled").checked) body.target_energy_in_lbf = number("inverse-energy");
+  return body;
+}
+
+const CHANCE_TOOLTIP = "Model estimate that a build of this design lands within all tolerances; assumes correlated normal errors calibrated on held-out tested designs.";
+
+const MATCH_TOOLTIP = "Relative 0–1 score for ranking candidate matches; not a calibrated probability. Feasibility labels summarize cumulative held-out hit rates at default force/length tolerances, not the success chance of an individual build.";
+
+function chanceTooltip(data) { return data.probability_mode === "match_score" ? MATCH_TOOLTIP : CHANCE_TOOLTIP; }
+function chanceLabel(data) { return data.probability_mode === "match_score" ? "Match score" : "Chance of hitting all targets"; }
+function chanceText(data, value) { return data.probability_mode === "match_score" ? fmt(value, 3) : `${(100*value).toFixed(1)}%`; }
+
+function renderInverseResults(host, data, allowUse = true) {
+  const results = data.results || [];
+  const label = chanceLabel(data);
+  const columns = ["Parameters", "Force ±1.96σ (lbf)", "Length ±1.96σ (in)", "Energy ±1.96σ (in·lbf)", label, "Nearest tested", "Flags"];
+  if (data.strategy) columns.push("Acquisition", "Reason");
+  const body = results.map((r) => {
+    const use = el("button", { type: "button", text: "Use this design", onclick: () => {
+      for (const [name, value] of Object.entries(r.parameters)) { const input = $(`param-${name}`); if (input) input.value = value; }
+      document.querySelector('[role="tab"][aria-controls="panel-design"]').click();
+    } });
+    const p = r.predicted, ci = r.interval_95;
+    const params = Object.entries(r.parameters).map(([k,v]) => `${k}: ${fmt(v,4)}`).join("; ");
+    const near = r.nearest_tested?.design_id ? `${r.nearest_tested.design_id} (d=${fmt(r.nearest_tested.distance,3)}); measured F ${fmt(r.nearest_tested.force_lbf)} lbf, L ${fmt(r.nearest_tested.length_in)} in, E ${fmt(r.nearest_tested.energy_in_lbf)} in·lbf` : "—";
+    const flag = r.untested_combination ? "Untested combination" : "Tested combination";
+    const row = [allowUse ? el("span", {}, params, el("br"), use) : params,
+      `${fmt(p.force_lbf)} ± ${fmt(1.96*r.sigma.force_lbf)} [${fmt(ci.force_lbf[0])}, ${fmt(ci.force_lbf[1])}]`,
+      `${fmt(p.length_in)} ± ${fmt(1.96*r.sigma.length_in)} in [${fmt(ci.length_in[0])}, ${fmt(ci.length_in[1])}]`,
+      `${fmt(p.energy_in_lbf)} ± ${fmt(1.96*r.sigma.energy_in_lbf)} [${fmt(ci.energy_in_lbf[0])}, ${fmt(ci.energy_in_lbf[1])}]`, chanceText(data, r.p_hit), near, flag];
+    if (data.strategy) return [...row, fmt(r.acquisition,4), r.reason || ""];
+    return row;
+  });
+  const table = el("table", { class: "metrics" }, el("thead", {}, el("tr", {}, columns.map((x) =>
+      x === label ? el("th", { text: x, title: chanceTooltip(data) }) : el("th", { text: x })))),
+    el("tbody", {}, body.map((row) => el("tr", {}, row.map((cell) => el("td", {}, cell))))));
+  const extras=[];
+  if (data.probability_mode === "match_score") extras.push(el("p", { class: "hint", text: "Feasibility labels are screening aids, not validated build probabilities. Labels for energy-inclusive requests or changed tolerances have not been validated." }));
+  if (data.closest_point) extras.push(el("p", { class: "hint", text: `Closest predicted point: force ${fmt(data.closest_point.predicted.force_lbf)} lbf, length ${fmt(data.closest_point.predicted.length_in)} in. Missed: ${(data.closest_point.missed_targets || []).map((x) => `${x.target} by ${fmt(x.missed_by)} (${x.direction})`).join("; ") || "no target outside tolerance"}.` }));
+  if (data.unfixed_comparison) {
+    const diff = data.unfixed_comparison.p_hit_difference_fixed_minus_unfixed;
+    const diffText = data.probability_mode === "match_score" ? fmt(diff, 3) : `${(100*diff).toFixed(1)} percentage points`;
+    extras.push(el("p", { class: "hint", text: `Best without fixed parameters: ${label.toLowerCase()} ${chanceText(data, data.unfixed_comparison.best.p_hit)}; fixed minus unfixed: ${diffText}.` }));
+  }
+  host.replaceChildren(...(data.warning ? [el("p", { class: "error", text: data.warning })] : []),
+    el("p", { class: "result-summary", title: data.feasibility ? chanceTooltip(data) : null, text: data.feasibility ? `${data.feasibility} — best ${label.toLowerCase()} ${chanceText(data, data.best_p_hit)}.` : `Strategy: ${data.strategy}.` }),
+    ...extras, el("div", { class: "table-wrap" }, table), el("p", { class: "hint", text: `${label}: ${chanceTooltip(data)}` }), el("p", { class: "hint", text: "Typical errors are about 3 lbf for force and 0.045 in for length; length differences under about 0.09 in are not reliably resolved. The ±1.96σ ranges assume normal errors and are not demonstrated 95% coverage intervals. Confirm suggestions with CAD checks and physical testing." }));
+}
+
+async function runInverse() {
+  showError("inverse-error", "");
+  try { const data = await api("/api/inverse", inverseRequest()); renderInverseResults($("inverse-results"), data); }
+  catch (error) { showError("inverse-error", error.message); }
+}
+
+async function runNextTests() {
+  showError("next-error", ""); $("download-next").disabled = true;
+  try {
+    const body = inverseRequest(); body.strategy = $("next-strategy").value; body.batch_size = Number($("next-size").value);
+    const data = await api("/api/next-tests", body); state.nextRows = data.results || []; state.nextMode = data.probability_mode; renderInverseResults($("next-results"), data, false); $("download-next").disabled = !state.nextRows.length;
+  } catch (error) { showError("next-error", error.message); }
 }
 
 async function loadCampaign3Report() {
@@ -805,6 +897,15 @@ async function init() {
   $("export-batch").addEventListener("click", () => downloadCsv("padml_batch_estimates.csv", state.batchRows));
   $("tested-curve-select").addEventListener("change", (e) => showTestedCurve(e.target.value));
   $("tab-campaign3").addEventListener("click", loadCampaign3Report);
+  $("inverse-energy-enabled").addEventListener("change", (e) => { $("inverse-energy").disabled = !e.target.checked; });
+  $("run-inverse").addEventListener("click", () => busy("run-inverse", "Searching…", runInverse));
+  $("run-next").addEventListener("click", () => busy("run-next", "Ranking…", runNextTests));
+  $("download-next").addEventListener("click", () => downloadCsv("padml_next_tests.csv", state.nextRows.map((r) => ({
+    run: "", ...r.parameters, predicted_force_lbf: r.predicted.force_lbf, predicted_length_in: r.predicted.length_in,
+    predicted_energy_in_lbf: r.predicted.energy_in_lbf, sigma_force_lbf: r.sigma.force_lbf,
+    sigma_length_in: r.sigma.length_in, sigma_energy_in_lbf: r.sigma.energy_in_lbf, p_hit: r.p_hit,
+    [state.nextMode === "match_score" ? "match_score" : "chance_all_targets"]: r.p_hit,
+  }))));
   $("predict-tested").addEventListener("click", () => busy("predict-tested", "Comparing… (about 20 s)", compareTested));
   if (state.models.length) await selectModel(state.models[0].slug);
   schedulePreview();
