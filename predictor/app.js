@@ -89,7 +89,11 @@ async function api(path, body) {
   const response = await rawRequest(path, body);
   let data = null;
   try { data = await response.json(); } catch { /* non-JSON error */ }
-  if (!response.ok) throw new Error((data && data.error) || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error((data && data.error) || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -149,6 +153,25 @@ function setupTabs() {
 function buildForm() {
   const container = $("param-fields");
   container.replaceChildren();
+  if (state.model && state.model.input_kind === "recurved_doe") {
+    const parameters = state.model.parameter_order.map((name) => ({
+      name, label: name.replaceAll("_", " "),
+      min: state.model.input_ranges[name].min, max: state.model.input_ranges[name].max,
+      default: state.model.fixed_parameters?.[name] ?? state.model.input_ranges[name].min,
+      fixed: state.model.fixed_parameters?.[name],
+    }));
+    for (const p of parameters) {
+      const id = `param-${p.name}`;
+      const fixed = p.fixed !== undefined;
+      const input = el("input", { id, name: p.name, type: "number", min: p.min, max: p.max,
+        step: p.name.endsWith("_deg") ? 1 : 0.001, value: fixed ? p.fixed : p.default,
+        required: true, ...(fixed ? { readOnly: true } : {}), "aria-describedby": `${id}-range` });
+      input.addEventListener("input", () => { if (!fixed) showError("form-error", ""); });
+      container.append(el("div", { class: "field-row" }, el("label", { for: id, text: `${p.label}${p.name.endsWith("_deg") ? " (deg)" : p.name.endsWith("_in") ? " (in)" : ""}` }), input,
+        el("span", { class: "range", id: `${id}-range`, text: fixed ? `Fixed at ${p.fixed} in` : `Tested ${p.min} to ${p.max}` })));
+    }
+    return;
+  }
   const byName = Object.fromEntries(state.parameters.map((p) => [p.name, p]));
   for (const [legend, names] of GROUPS) {
     const fieldset = el("fieldset", {}, el("legend", { text: legend }));
@@ -180,6 +203,19 @@ function buildForm() {
 
 function readParams() {
   const params = {};
+  if (state.model?.input_kind === "recurved_doe") {
+    for (const name of state.model.parameter_order) {
+      const input = $(`param-${name}`); const value = Number(input.value);
+      input.removeAttribute("aria-invalid");
+      const bounds = state.model.input_ranges[name];
+      if (input.value === "" || !Number.isFinite(value) || value < bounds.min || value > bounds.max) {
+        input.setAttribute("aria-invalid", "true");
+        throw new Error(`${name} must be between ${bounds.min} and ${bounds.max}.`);
+      }
+      params[name] = value;
+    }
+    return params;
+  }
   for (const p of state.parameters) {
     const input = $(`param-${p.name}`);
     input.removeAttribute("aria-invalid");
@@ -235,6 +271,7 @@ function drawOutline(target, outline) {
 
 let previewTimer = null;
 function schedulePreview() {
+  if (state.model?.input_kind === "recurved_doe") return;
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
     let params;
@@ -361,7 +398,11 @@ function resultChart(result, compareTo, name) {
   const series = [curveSeries(result.curve, "Predicted (band: 10th–90th percentile of trees)", "predicted")];
   if (compareTo && compareTo.curve) series.push({ ...curveSeries(compareTo.curve, "Baseline", "baseline"), low: null, high: null });
   const length = result.estimates.find((e) => e.name === "plateau_length_pct");
-  const markers = length && length.value_in !== undefined ? [{ x: length.value_in, label: "densification onset", cls: "onset" }] : [];
+  const interval = Number.isFinite(result.curve.plateau_start_in) && Number.isFinite(result.curve.plateau_end_in);
+  const markers = interval ? [
+    { x: result.curve.plateau_start_in, label: "plateau start", cls: "onset" },
+    { x: result.curve.plateau_end_in, label: "plateau end", cls: "onset" },
+  ] : length && length.value_in !== undefined ? [{ x: length.value_in, label: "densification onset", cls: "onset" }] : [];
   return chartPanel(series, { markers, download: curveCsv(result.curve, name) });
 }
 
@@ -399,6 +440,9 @@ function estimateCards(result, compareTo, name = "design") {
       el("ul", {}, result.out_of_range.slice(0, 8).map((f) =>
         el("li", { text: `${f.feature} = ${fmt(f.value, 4)} (trained ${fmt(f.low, 4)} to ${fmt(f.high, 4)})` }))),
       result.out_of_range.length > 8 ? el("div", { text: `…and ${result.out_of_range.length - 8} more.` }) : null));
+  }
+  if (result.tested_parameter_combination === false) {
+    nodes.push(el("p", { class: "warnings", text: "Untested parameter combination. It is within the tested ranges, but this combination was not validated." }));
   }
   if (result.measured) {
     nodes.push(el("details", {}, el("summary", { text: "Measured geometry the model saw" }),
@@ -444,7 +488,7 @@ async function estimateDesign(event) {
   try {
     const result = await api("/api/predict", { model: state.model.slug, params });
     state.lastDesign = result;
-    drawOutline("preview", result.outline);
+    if (result.outline) drawOutline("preview", result.outline);
     target.replaceChildren(...estimateCards(result, state.baseline && state.baseline.model === state.model.slug ? state.baseline.result : null));
     const reference = $("load-reference").selectedOptions[0];
     addHistory(reference && reference.value ? reference.textContent : "custom", result);
@@ -591,6 +635,19 @@ function renderAbout(model) {
   const accuracy = model.accuracy || {};
   const cv = (accuracy.cross_validation || {}).metrics || [];
   const held = (accuracy.held_out || {}).metrics || [];
+  const recurvedMetrics = accuracy.plateau_force_lbf ? el("table", { class: "metrics" },
+    el("thead", {}, el("tr", {}, ["Target", "MAE", "R²", "Noise floor", "≈ resolvable"].map((c) => el("th", { text: c })))),
+    el("tbody", {}, [
+      ["Plateau force", accuracy.plateau_force_lbf, "lbf"],
+      ["Plateau length", accuracy.plateau_length_in, "in"],
+      ["Energy", accuracy.energy_in_lbf, "in·lbf"],
+    ].map(([target, metric, unit]) => el("tr", {},
+      el("td", { text: target }),
+      el("td", { text: `${metric.mae.toFixed(unit === "lbf" ? 2 : 3)} ${unit}` }),
+      el("td", { text: metric.r2.toFixed(3) }),
+      el("td", { text: `${metric.noise_floor_mae} ${unit}` }),
+      el("td", { text: `${metric.resolvable_difference_approx} ${unit}` }))))
+  ) : null;
   about.append(el("h2", { text: model.name }), el("p", { text: model.description || "" }),
     el("div", { class: "about-grid" },
       el("div", {},
@@ -598,11 +655,13 @@ function renderAbout(model) {
         el("ul", {}, model.targets.map((t) => el("li", {}, el("strong", { text: `${t.label} (${t.unit}): ` }),
           (model.target_definitions || {})[t.name] || ""))),
         el("h3", { text: "Inputs" }),
-        el("p", { text: `${model.feature_count} geometry features (${model.feature_set}) measured by PadML Studio. ` +
-          `Family: ${model.family_label || model.design_family || "any"}. Estimator: ${model.estimator}, ` +
-          `${model.training_count} training designs.` })),
+        el("p", { text: model.input_kind === "recurved_doe"
+          ? `Eight nominal DOE parameters. Family: ${model.family_label}. Target definition: ${model.target_definition_id}.`
+          : `${model.feature_count} geometry features (${model.feature_set}) measured by PadML Studio. Family: ${model.family_label || model.design_family || "any"}. Estimator: ${model.estimator}, ${model.training_count} training designs.` })),
       el("div", {},
         el("h3", { text: "Accuracy" }),
+        accuracy.method ? el("p", { class: "hint", text: accuracy.method }) : null,
+        recurvedMetrics,
         cv.length ? el("p", { class: "hint", text: (accuracy.cross_validation || {}).method || "" }) : null,
         cv.length ? el("table", { class: "metrics" },
           el("tr", {}, ["Target", "MAE", "RMSE", "R²", "Plateau length MAE"].map((h) => el("th", { text: h }))),
@@ -623,7 +682,22 @@ function renderAbout(model) {
 async function selectModel(slug) {
   state.model = state.models.find((m) => m.slug === slug);
   if (!state.model) return;
-  $("model-family").textContent = state.model.design_family ? `${state.model.design_family} only` : "";
+  const isDoe = state.model.input_kind === "recurved_doe";
+  $("model-family").textContent = state.model.family_label ? state.model.family_label :
+    (state.model.design_family ? `${state.model.design_family} only` : "");
+  $("design-form-title").textContent = isDoe ? "Campaign 3 DOE parameters" : "Chevron parameters";
+  $("design-form").querySelector(".hint").textContent = isDoe
+    ? "Enter the 8 nominal DOE parameters. Values outside tested ranges are rejected. In-range combinations absent from the experiment are flagged."
+    : "Left and right struts are mirrored. Angles are the leg's inner edge to the interface. Widths are each leg's mean horizontal width.";
+  $("load-reference").parentElement.hidden = isDoe;
+  $("preview").closest(".card").hidden = isDoe;
+  $("tab-upload").hidden = isDoe;
+  $("tab-batch").hidden = isDoe;
+  $("tab-tested").hidden = isDoe;
+  $("design-form").querySelector("#set-baseline").hidden = isDoe;
+  $("design-form").querySelector("#reset-params").hidden = isDoe;
+  $("session-card").hidden = isDoe;
+  buildForm();
   renderAbout(state.model);
   try {
     state.references = (await api(`/api/models/${encodeURIComponent(slug)}/references`)).references;
@@ -633,11 +707,43 @@ async function selectModel(slug) {
     ...state.references.map((r) => el("option", { value: r.design_id, text: `${r.design_id.replace("CHEVRON_SCREENING1_", "")} (${r.role})` })));
   renderTested(referenceRows());
   const block = $("tested-curve-block");
+  $("tab-upload").hidden = isDoe;
+  $("tab-batch").hidden = isDoe;
+  $("tab-tested").hidden = isDoe;
   block.hidden = !state.model.has_curves;
   $("tested-curve").replaceChildren();
   if (state.model.has_curves) {
     $("tested-curve-select").replaceChildren(el("option", { value: "", text: "Choose a tested design…" }),
       ...state.references.map((r) => el("option", { value: r.design_id, text: r.design_id.replace("CHEVRON_SCREENING1_", "") })));
+  }
+}
+
+async function loadCampaign3Report() {
+  const target = $("campaign3-report");
+  if (target.dataset.loaded) return;
+  try {
+    const report = await api("/api/reports/campaign3");
+    target.replaceChildren(el("h2", { text: report.title }));
+    for (const section of report.sections) {
+      target.append(el("h3", { text: section.title }));
+      for (const paragraph of section.paragraphs || []) target.append(el("p", { text: paragraph }));
+      if (section.table) {
+        const table = el("table", { class: "metrics" },
+          el("thead", {}, el("tr", {}, section.table.columns.map((c) => el("th", { text: c })))),
+          el("tbody", {}, section.table.rows.map((row) => el("tr", {}, row.map((cell) => el("td", { text: String(cell) }))))));
+        target.append(el("div", { class: "table-wrap" }, table));
+      }
+      for (const image of section.images || []) target.append(el("figure", {},
+        el("img", { src: image.data_url, alt: image.alt, loading: "lazy", class: "report-figure" }),
+        el("figcaption", { text: image.caption })));
+    }
+    target.dataset.loaded = "true";
+  } catch (error) {
+    // 503 means the server runs without a password; the report is never served unauthenticated.
+    const message = error.status === 503
+      ? "Campaign 3 data needs the server to run with a password. Stop the server, set PADML_PREDICTOR_PASSWORD (PowerShell: $env:PADML_PREDICTOR_PASSWORD = '<passphrase>'), restart it, then reopen this tab."
+      : error.message;
+    target.replaceChildren(el("p", { class: "error", text: message }));
   }
 }
 
@@ -698,6 +804,7 @@ async function init() {
   $("run-batch").addEventListener("click", () => busy("run-batch", "Estimating…", runBatch));
   $("export-batch").addEventListener("click", () => downloadCsv("padml_batch_estimates.csv", state.batchRows));
   $("tested-curve-select").addEventListener("change", (e) => showTestedCurve(e.target.value));
+  $("tab-campaign3").addEventListener("click", loadCampaign3Report);
   $("predict-tested").addEventListener("click", () => busy("predict-tested", "Comparing… (about 20 s)", compareTested));
   if (state.models.length) await selectModel(state.models[0].slug);
   schedulePreview();

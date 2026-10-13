@@ -87,6 +87,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .preview .material { fill: var(--material); stroke: var(--material-edge); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .preview .apex { stroke: #c0392b; stroke-dasharray: 4 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .preview .dim { font-size: 11px; fill: var(--muted); }
+.report-figure { display: block; width: 100%; height: auto; max-width: 1200px; margin: .75rem auto; }
+figure { margin: 1rem 0; }
+figcaption { color: var(--muted); font-size: .85rem; text-align: center; }
 
 .result-empty { color: var(--muted); }
 .estimates { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }

@@ -41,13 +41,14 @@
     <button role="tab" id="tab-batch" aria-controls="panel-batch" aria-selected="false" tabindex="-1">Batch</button>
     <button role="tab" id="tab-tested" aria-controls="panel-tested" aria-selected="false" tabindex="-1">Tested designs</button>
     <button role="tab" id="tab-about" aria-controls="panel-about" aria-selected="false" tabindex="-1">About this model</button>
+    <button role="tab" id="tab-campaign3" aria-controls="panel-campaign3" aria-selected="false" tabindex="-1">Campaign 3 data</button>
   </nav>
 
   <main>
     <section id="panel-design" role="tabpanel" aria-labelledby="tab-design" class="panel">
       <div class="design-grid">
         <form id="design-form" class="card" novalidate>
-          <h2>Chevron parameters</h2>
+          <h2 id="design-form-title">Chevron parameters</h2>
           <p class="hint">Left and right struts are mirrored. Angles are the leg's inner edge to the interface.
             Widths are each leg's mean horizontal width.</p>
           <div class="field-row">
@@ -76,7 +77,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="session-card">
         <div class="card-head">
           <h2>Session history</h2>
           <div>
@@ -159,6 +160,10 @@
 
     <section id="panel-about" role="tabpanel" aria-labelledby="tab-about" class="panel" hidden>
       <div class="card" id="about"></div>
+    </section>
+
+    <section id="panel-campaign3" role="tabpanel" aria-labelledby="tab-campaign3" class="panel" hidden>
+      <div class="card" id="campaign3-report"><p class="hint">Loading Campaign 3 report…</p></div>
     </section>
   </main>
 
