@@ -1,159 +1,88 @@
 "use strict";
 (() => {
-  const $ = id => document.getElementById(id);
-  const config = window.PADML_CONFIG || {};
-  const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
-  const base = config.trainingBase !== undefined ? String(config.trainingBase).replace(/\/+$/, "") : (local ? "" : null);
-  const tokenKey = `padml-training-token:${base}`;
-  let token = "", jobs = [], selected = null, deployment = false, timer = null, loadedReview = null, hosted = false;
-  const blobs = [];
-  let preparation = null, preparationEpoch = 0;
-  const node = (tag, text, cls) => { const n = document.createElement(tag); if(text !== undefined) n.textContent = text; if(cls) n.className=cls; return n; };
-  const error = (id, message) => { $(id).textContent = message || ""; $(id).hidden = !message; };
-  async function request(path, payload, raw=false) {
-    if(base === null) throw new Error("No training worker is configured for this hosted page. Open the workspace on your training PC.");
-    const response = await fetch(base + "/api/training/" + path, {method:payload === undefined ? "GET":"POST",
-      headers:{"X-Training-Token":token,...(payload === undefined?{}:{"Content-Type":"application/json"})},
-      ...(payload === undefined ? {} : {body:JSON.stringify(payload)})});
-    if(!response.ok) { const data=await response.json().catch(()=>({})); throw new Error(data.error || `Request failed (${response.status})`); }
-    if(raw && hosted && response.headers.get('content-type')?.includes('application/json')) {
-      const info=await response.json();
-      if(info.download_url){const artifact=await fetch(info.download_url);if(!artifact.ok)throw new Error('Report download failed. Refresh to retry.');return artifact;}
-      return new Response(JSON.stringify(info),{headers:{'Content-Type':'application/json'}});
-    }
-    return raw ? response : response.json();
+  const $=id=>document.getElementById(id),node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+  const config=window.PADML_CONFIG||{},base=String(config.trainingBase||config.apiBase||'').replace(/\/+$/,''),tokenKey=`padml-training-token:${base}`;
+  let token='',jobs=[],selected=null,timer=null,files=[],preparation=null,epoch=0,loaded=null,aiReady=false;
+  const urls=[];const campaign=()=>`campaign${Number($('campaign-number').value)}`;
+  const error=(id,text)=>{$(id).textContent=text||'';$(id).hidden=!text;};
+  async function request(path,data){const r=await fetch(base+'/api/training/'+path,{method:data===undefined?'GET':'POST',headers:{'X-Training-Token':token,...(data===undefined?{}:{'Content-Type':'application/json'})},...(data===undefined?{}:{body:JSON.stringify(data)})});const body=await r.json();if(!r.ok)throw new Error(body.error||`Request failed (${r.status})`);return body;}
+  function resetPreparation(){epoch++;preparation=null;$('conversation').hidden=true;$('prep-status').textContent='';}
+  function listFiles(){resetPreparation();$('file-list').replaceChildren(...files.map(f=>node('li',`${f.name} · ${(f.size/1024).toFixed(1)} KB`)));}
+  $('raw-files').addEventListener('change',()=>{files=Array.from($('raw-files').files);listFiles();});
+  $('drop-zone').addEventListener('dragover',e=>{e.preventDefault();$('drop-zone').classList.add('dragging');});
+  $('drop-zone').addEventListener('dragleave',()=>$('drop-zone').classList.remove('dragging'));
+  $('drop-zone').addEventListener('drop',e=>{e.preventDefault();$('drop-zone').classList.remove('dragging');files=Array.from(e.dataTransfer.files);listFiles();});
+  ['prep-notes','base-run','run-name'].forEach(id=>$(id).addEventListener('change',resetPreparation));
+  function updateBaseNote(){const j=jobs.find(j=>j.id===$('base-run').value);$('base-note').textContent=j?.condition_note||(j?'Only compatible family, variables and test conditions can be combined.':'');}
+  $('base-run').addEventListener('change',updateBaseNote);
+  async function refresh(){const response=await request('jobs');jobs=response.jobs;renderDashboard();}
+  function renderDashboard(){
+    const active=jobs.filter(j=>(j.campaign_id||j.summary?.campaign_id||'campaign3')===campaign());
+    $('campaign-title').textContent=`Campaign ${Number($('campaign-number').value)}`;
+    $('campaign-summary').textContent=active.filter(j=>j.state!=='archived').length?'Select a version to see its dataset, validation and measured-parameter graphs.':'No versions yet. Drop data below to start this campaign.';
+    $('version-list').replaceChildren();$('archived-list').replaceChildren();
+    active.sort((a,b)=>(b.version||0)-(a.version||0)).forEach(j=>{
+      const card=node('div',undefined,'version-card');card.append(node('h3',`v${j.version||'?'} · ${j.name}`),node('p',`${j.state.replaceAll('_',' ')} · ${j.summary?.specimens||0} specimens / ${j.summary?.design_groups||0} designs`));
+      const button=node('button',j.state==='archived'?'Restore version group':'View data and graphs');button.type='button';button.addEventListener('click',async()=>{try{if(j.state==='archived'){await request(`jobs/${j.id}/restore`,{});await refresh();}else await openJob(j.id);}catch(e){error('connection-error',e.message);}});card.append(button);
+      $(j.state==='archived'?'archived-list':'version-list').append(card);
+    });
+    const old=$('base-run').value;$('base-run').replaceChildren(new Option('New dataset—uploaded data only',''));
+    active.filter(j=>j.state!=='archived'&&(j.evaluation||j.historical)).forEach(j=>$('base-run').append(new Option(`v${j.version||'?'} · ${j.name}`,j.id)));
+    $('base-run').value=old;updateBaseNote();
   }
-  function download(name, blob, host) {
-    const url=URL.createObjectURL(blob); blobs.push(url);
-    const a=node("a",name); a.href=url; a.download=name; host.append(a);
-  }
-  async function refresh() {
-    const response=await request("jobs"); jobs=response.jobs; deployment=response.deployment_enabled;hosted=!!response.hosted;
-    $("job-list").replaceChildren();
-    if(!jobs.length) $("job-list").append(node("p","No runs yet. Upload a batch to begin.","hint"));
-    jobs.forEach(job=>{const b=node("button",undefined,"job-item"); b.type="button"; b.append(node("span",job.name),node("small",job.state.replaceAll("_"," ")));
-      b.setAttribute("aria-current",String(job.id === selected)); b.addEventListener("click",()=>openJob(job.id).catch(e=>error("run-error",e.message))); $("job-list").append(b);});
-    const old=$("base-run").value; $("base-run").replaceChildren(new Option("New dataset — uploaded data only",""));
-    jobs.filter(j=>j.evaluation).forEach(j=>$("base-run").append(new Option(j.name,j.id))); $("base-run").value=old;
-  }
-  async function connect(event) {
-    if(event) event.preventDefault(); error("connection-error",""); token=$("admin-token").value;
-    const button=$("connect-form").querySelector("button"); button.disabled=true;
-    try {await refresh(); sessionStorage.setItem(tokenKey,token); $("workspace").hidden=false; $("connection-status").textContent=hosted?"Connected to cloud training. Jobs continue when you close this tab.":"Connected. Your data and jobs stay on this worker.";
-      $("prep-suggest").disabled=true;
-      if(hosted){try{const capability=await request('preparation');$("prep-suggest").disabled=!capability.configured;$("prep-availability").textContent=capability.configured?'Ready: GPT-6 Luna · medium reasoning.':'AI preparation needs the server OpenAI API key. Standard uploads are available now.';}catch{$("prep-availability").textContent='AI preparation is unavailable. Standard uploads are available.';}}
-      else $("prep-availability").textContent='AI preparation is available on the hosted training workspace.';
-    }
-    catch(e){error("connection-error",e.message); $("workspace").hidden=true;}
-    finally{button.disabled=false;}
-  }
-  $("connect-form").addEventListener("submit",connect);
-  function clearPreparation(){preparation=null;preparationEpoch++;$("prep-review").hidden=true;$("prep-reviewed").checked=false;$("prep-downloads").replaceChildren();}
-  ["prep-designs","prep-specimens","prep-curves","prep-manifest","prep-notes"].forEach(id=>$(id).addEventListener('change',clearPreparation));
-  $("prep-suggest").addEventListener('click',async()=>{
-    error('prep-error','');clearPreparation();const epoch=preparationEpoch;const button=$("prep-suggest");button.disabled=true;
+  $('connect-form').addEventListener('submit',async e=>{e.preventDefault();token=$('admin-token').value;error('connection-error','');const b=e.submitter||$('connect-form').querySelector('button');b.disabled=true;try{await refresh();sessionStorage.setItem(tokenKey,token);$('workspace').hidden=false;$('connection-status').textContent='Connected. Cloud jobs continue when you close this tab.';const capability=await request('preparation');aiReady=capability.configured;$('analyze').disabled=!aiReady;$('prep-availability').textContent=aiReady?'GPT-6 Luna · medium reasoning':'OpenAI API key is not configured.';}catch(err){error('connection-error',err.message);}finally{b.disabled=false;}});
+  $('disconnect').addEventListener('click',()=>{clearTimeout(timer);resetPreparation();token='';selected=null;sessionStorage.removeItem(tokenKey);$('admin-token').value='';$('workspace').hidden=true;$('connection-status').textContent='Disconnected.';});
+  $('refresh').addEventListener('click',async()=>{try{await refresh();if(selected)await openJob(selected);}catch(e){error('connection-error',e.message);}});
+  $('campaign-number').addEventListener('change',()=>{if(!$('campaign-number').checkValidity())return;clearTimeout(timer);selected=null;resetPreparation();renderDashboard();$('upload-panel').hidden=false;$('run-panel').hidden=true;});
+  $('new-upload').addEventListener('click',()=>{clearTimeout(timer);selected=null;$('upload-panel').hidden=false;$('run-panel').hidden=true;$('run-name').focus();});
+  async function analyze(answer){const generation=epoch;error('prep-error','');$('analyze').disabled=true;$('answer').disabled=true;$('accept').hidden=true;
     try{
-      if(!$("prep-consent").checked)throw new Error('Confirm sharing the column names and sample rows with OpenAI first.');
-      const raw=Object.fromEntries(['designs','specimens','curves'].map(n=>[n+'.csv',$("prep-"+n).files[0]]));
-      if(Object.values(raw).some(f=>!f))throw new Error('Choose all three raw CSV tables.');
-      if(Object.values(raw).reduce((n,f)=>n+f.size,0)>64*1024*1024)throw new Error('Upload exceeds 64 MB.');
-      const settings=$("prep-manifest").files[0];const manifest=settings?JSON.parse(await settings.text()):JSON.parse((await request('template')).files['batch.json']);
-      $("prep-status").textContent='Uploading to private storage…';
-      const upload=await request('preparation/uploads',{manifest,share_samples_with_openai:true,notes:$("prep-notes").value,sizes:Object.fromEntries(Object.entries(raw).map(([n,f])=>[n,f.size]))});
-      for(const [name,post] of Object.entries(upload.uploads)){const form=new FormData();Object.entries(post.fields).forEach(([k,v])=>form.append(k,v));form.append('file',raw[name],name);const r=await fetch(post.url,{method:'POST',body:form});if(!r.ok)throw new Error('Raw upload failed. Retry with a new preparation.');}
-      $("prep-status").textContent='Luna is reviewing column meanings and units. This can take up to two minutes…';
-      const result=await request(`preparation/${upload.id}/suggest`,{});if(epoch!==preparationEpoch)return;
-      preparation={id:upload.id,...result};$("prep-warnings").replaceChildren();
-      [...result.proposal.questions,...result.proposal.warnings].forEach(t=>$("prep-warnings").append(node('p',t,'hint')));
-      const table=node('table',undefined,'metrics'),header=node('tr');['Table','Training field','Source column','Conversion'].forEach(t=>header.append(node('th',t)));const head=node('thead');head.append(header);table.append(head);const body=node('tbody');
-      result.proposal.mappings.forEach(m=>{const row=node('tr');row.append(node('td',m.table),node('td',m.target));
-        const source=node('select');source.setAttribute('aria-label',`Source for ${m.table} ${m.target}`);source.append(new Option('Select a source column',''));result.profiles[m.table].columns.forEach(h=>source.append(new Option(h,h)));source.value=m.source||'';
-        const conversion=node('select');conversion.setAttribute('aria-label',`Conversion for ${m.target}`);[['identity','Keep original units'],['mm_to_in','mm → in'],['N_to_lbf','N → lbf'],['kN_to_lbf','kN → lbf'],['rad_to_deg','rad → deg']].forEach(([v,t])=>conversion.append(new Option(t,v)));conversion.value=m.conversion;
-        source.addEventListener('change',()=>{m.source=source.value||null;preparationEpoch++;$("prep-reviewed").checked=false;});conversion.addEventListener('change',()=>{m.conversion=conversion.value;preparationEpoch++;$("prep-reviewed").checked=false;});
-        const cell=node('td');cell.append(source);const unit=node('td');unit.append(conversion);row.append(cell,unit);body.append(row);
-      });table.append(body);$("prep-mappings").replaceChildren(table);$("prep-review").hidden=false;
-      $("prep-status").textContent='Mapping ready for review. No measurements have been changed.';
-    }catch(e){error('prep-error',e.message);$("prep-status").textContent='Preparation did not finish.';}finally{button.disabled=false;}
-  });
-  $("prep-apply").addEventListener('click',async()=>{
-    error('prep-error','');const button=$("prep-apply");button.disabled=true;const epoch=preparationEpoch;
-    try{
-      if(!preparation||!$("prep-reviewed").checked)throw new Error('Review and confirm the mapping first.');
-      $("prep-status").textContent='Python is preparing your files…';
-      const result=await request(`preparation/${preparation.id}/apply`,{proposal:preparation.proposal,reviewed:true});
-      const loaded=await Promise.all(Object.entries(result.files).map(async([name,url])=>{const r=await fetch(url);if(!r.ok)throw new Error('Prepared-file download expired or failed. Apply the mapping again.');return [name,await r.blob()];}));
-      if(epoch!==preparationEpoch)return;$("prep-downloads").replaceChildren();
-      for(const [name,blob] of loaded){download(name,blob,$("prep-downloads"));if(name==='preparation_audit.json')continue;
-        const id=name==='batch.json'?'manifest-file':name.replace('.csv','-file');const transfer=new DataTransfer();transfer.items.add(new File([blob],name,{type:blob.type}));$(id).files=transfer.files;
+      if(!preparation){
+        if(!$('prep-consent').checked)throw new Error('Confirm sharing samples and notes with OpenAI first.');
+        if(!files.length||files.length>50||files.reduce((n,f)=>n+f.size,0)>64*1024*1024)throw new Error('Choose 1–50 files, at most 64 MB total.');
+        $('prep-status').textContent='Uploading your files to private storage…';
+        const upload=await request('smart/uploads',{campaign_id:campaign(),name:$('run-name').value,base_id:$('base-run').value||null,notes:$('prep-notes').value,share_samples_with_openai:true,files:files.map(f=>({name:f.name,size:f.size}))});
+        for(const post of upload.uploads){const form=new FormData();Object.entries(post.fields).forEach(([k,v])=>form.append(k,v));form.append('file',files.find(f=>f.name===post.name),post.name);const r=await fetch(post.url,{method:'POST',body:form});if(!r.ok)throw new Error('Upload failed. Select the files again to retry.');}
+        if(generation!==epoch)return;preparation={id:upload.id};
       }
-      $("manifest-file").dispatchEvent(new Event('change'));$("mapping-verified").checked=false;$("condition-verified").checked=false;
-      const excluded=Object.entries(result.ignored_columns).filter(([,cols])=>cols.length).map(([name,cols])=>`${name}: ${cols.join(', ')}`).join('; ');
-      $("prep-status").textContent='Prepared files are loaded below. Confirm the experiment, then select Check data.'+(excluded?' Excluded columns: '+excluded:'');
-    }catch(e){error('prep-error',e.message);}finally{button.disabled=false;}
-  });
-  $("disconnect").addEventListener("click",()=>{clearPreparation();clearTimeout(timer);sessionStorage.removeItem(tokenKey);token="";$("admin-token").value="";$("workspace").hidden=true;$("connection-status").textContent="Disconnected. Running jobs continue on the worker.";});
-  $("refresh-jobs").addEventListener("click",async()=>{try{await refresh();if(selected)await openJob(selected);}catch(e){error("connection-error",e.message);}});
-  $("new-upload").addEventListener("click",()=>{clearTimeout(timer);selected=null;$("upload-panel").hidden=false;$("run-panel").hidden=true;$("run-name").focus();});
-  $("manifest-file").addEventListener("change",async()=>{try{const m=JSON.parse(await $("manifest-file").files[0].text());$("material").value=m.condition?.material||"";$("fixture").value=m.condition?.fixture||"";$("speed").value=m.condition?.speed_in_min??"";$("mapping-verified").checked=false;$("condition-verified").checked=false;error("upload-error","");}catch{error("upload-error","Could not read batch.json. Choose a valid JSON settings file.");}});
-  $("get-template").addEventListener("click",async()=>{try{const data=await request("template");$("template-links").replaceChildren();Object.entries(data.files).forEach(([name,text])=>download(name,new Blob([text],{type:name.endsWith("json")?"application/json":"text/csv"}),$("template-links")));}catch(e){error("upload-error",e.message);}});
-  $("upload-form").addEventListener("submit",async event=>{event.preventDefault();error("upload-error","");const button=$("validate-upload");button.disabled=true;button.textContent="Checking data…";
-    try{const picks=["manifest","designs","specimens","curves"].map(n=>$(n+"-file").files[0]);if(picks.reduce((n,f)=>n+f.size,0)>64*1024*1024)throw new Error("Upload exceeds 64 MB.");
-      const [settings,designs,specimens,curves]=await Promise.all(picks.map(f=>f.text()));const manifest=JSON.parse(settings);
-      manifest.condition={...manifest.condition,material:$("material").value.trim(),fixture:$("fixture").value.trim(),speed_in_min:Number($("speed").value)};
-      manifest.mapping_verified=$("mapping-verified").checked;manifest.condition_verified=$("condition-verified").checked;
-      const payload={name:$("run-name").value,base_id:$("base-run").value||null,manifest,files:{"designs.csv":designs,"specimens.csv":specimens,"curves.csv":curves}};
-      let job;
-      if(hosted){
-        const sizes=Object.fromEntries(Object.entries(payload.files).map(([n,t])=>[n,new Blob([t]).size]));
-        const prepared=await request('uploads/prepare',{name:payload.name,base_id:payload.base_id,manifest,sizes});
-        for(const [name,post] of Object.entries(prepared.uploads)){
-          const form=new FormData();Object.entries(post.fields).forEach(([k,v])=>form.append(k,v));form.append('file',new Blob([payload.files[name]]),name);
-          const uploaded=await fetch(post.url,{method:'POST',body:form});if(!uploaded.ok)throw new Error('File upload failed. Start a new upload to retry.');
-        }
-        job=await request(`jobs/${prepared.id}/commit`,{});
-      }else job=await request('uploads',payload);
-      await refresh();await openJob(job.id);
-    }catch(e){error("upload-error",e.message);}finally{button.disabled=false;button.textContent="Check data";}});
-  async function review(job) {
-    if(loadedReview===job.id)return;
-    loadedReview=job.id;$("metrics").replaceChildren();$("figures").replaceChildren();$("report-links").replaceChildren();
-    const table=node("table",undefined,"metrics"),head=node("tr");["Output","Held-out MAE","R²","Mean-baseline MAE"].forEach(t=>head.append(node("th",t)));const thead=node("thead");thead.append(head);table.append(thead);
-    const body=node("tbody");Object.entries(job.evaluation.metrics).forEach(([name,m])=>{const row=node("tr");[name.replaceAll("_"," "),Number(m.mae).toPrecision(4),m.r2 === null ? "Not estimable":Number(m.r2).toFixed(3),Number(job.evaluation.mean_baseline[name].mae).toPrecision(4)].forEach(t=>row.append(node("td",t)));body.append(row);});table.append(body);$("metrics").append(table);
-    const prefix=`jobs/${job.id}/artifacts/`;
-    try {const response=await request(prefix+"REPORT.md",undefined,true);const text=await response.text();if(selected!==job.id)return;$("training-report").textContent=text;
-      for(const [file,caption] of [["validation.png","Held-out prediction accuracy"],["measured_force_vs_parameters.png","Measured plateau force against each parameter"],["measured_length_vs_parameters.png","Measured plateau length against each parameter"]]){
-        const r=await request(prefix+file,undefined,true),blob=await r.blob();if(selected!==job.id)return;const url=URL.createObjectURL(blob);blobs.push(url);const fig=node("figure"),img=node("img");img.src=url;img.alt=caption;fig.append(node("figcaption",caption),img);$("figures").append(fig);
-      }
-      for(const file of ["evaluation.json","validation_predictions.csv"]){const r=await request(prefix+file,undefined,true),blob=await r.blob();if(selected!==job.id)return;download(file,blob,$("report-links"));}
-    }catch(e){loadedReview=null;throw e;}
-    $("publish-name").value=job.name;$("publish-slug").value=`campaign3-${job.id.slice(0,8)}`;$("reviewed").checked=false;$("deploy-hosted").checked=false;
-    $("deploy-hosted").checked=hosted;$("deploy-hosted").disabled=hosted||!deployment;
-    $("publish-button").textContent=hosted?'Publish to website':'Publish to local Predictor';
-    $("deployment-note").textContent=hosted?'Publishing verifies and activates this version in the hosted Predictor. The current default stays selected.':deployment?"Hosted deployment builds and checks the container before updating the existing API.":"Hosted deployment is not configured on this worker. This publishes to the local Predictor.";
+      $('prep-status').textContent='Luna is identifying your data and checking what is missing…';
+      const result=await request(`smart/${preparation.id}/analyze`,{answer:answer||''});if(generation!==epoch)return;
+      preparation={...preparation,...result};$('conversation').hidden=false;$('questions').replaceChildren();
+      result.plan.questions.forEach(q=>$('questions').append(node('p',q)));
+      result.plan.warnings.forEach(w=>$('questions').append(node('p',w,'hint')));
+      $('mapping-plan').textContent=JSON.stringify(result.plan,null,2);$('prepared-summary').replaceChildren();$('prep-answer').value='';
+      if(result.summary){const p=result.plan;$('prepared-summary').append(node('h3',`${result.summary.specimens} specimens · ${result.summary.designs} designs`),node('p',`${p.family} · ${p.material} · fixture: ${p.fixture} · ${p.speed_in_min} in/min · 0.8 in stroke`),node('p',`Inputs: ${p.variables.map(v=>`${v.name} (${v.unit})`).join(', ')}`));
+        if($('base-run').value)$('prepared-summary').append(node('p','Includes the selected earlier dataset. By continuing you confirm its mapping and the same material, fixture and test conditions.'));
+        $('accept').hidden=false;$('prep-status').textContent='Dataset prepared. Review the summary, or send corrections below.';
+      }else $('prep-status').textContent='Luna needs your answers before it can prepare the dataset.';
+    }catch(e){error('prep-error',e.message);$('prep-status').textContent='Preparation needs attention.';}finally{$('analyze').disabled=!aiReady;$('answer').disabled=false;}
   }
-  async function openJob(id) {
-    clearTimeout(timer);if(selected!==id)loadedReview=null;selected=id;$("upload-panel").hidden=true;$("run-panel").hidden=false;$("publish-form").hidden=true;
-    const job=await request(`jobs/${id}`); if(selected!==id)return;
-    $("run-title").textContent=job.name;$("run-state").textContent=job.state.replaceAll("_"," ");$("run-counts").textContent=`${job.summary.specimens} specimens / ${job.summary.design_groups} designs`;
-    $("run-summary").replaceChildren(node("p",`Inputs: ${job.summary.features.join(", ")}`,"hint"));error("run-error",job.error||"");
-    const running=["validating","training","publishing"].includes(job.state);$("progress-section").hidden=!running;
-    const p=job.progress||{};if(p.total_folds){$("run-progress").max=p.total_folds;$("run-progress").value=p.completed_folds;}else{$("run-progress").removeAttribute("value");}
-    $("run-progress-text").textContent=job.state==="validating"?"Checking uploaded files, mappings and test conditions…":job.state==="publishing"?"Verifying the model, rebuilding inverse artifacts and publishing…":p.stage==="nested_validation"?`Validating design ${p.completed_folds} of ${p.total_folds}`:(p.stage||"Starting worker").replaceAll("_"," ");
-    $("start-training").hidden=job.state!=="validated";$("start-training").disabled=!job.summary.training_minimum_met;
-    if(job.state==="validated"&&!job.summary.training_minimum_met)error("run-error","At least 12 independent designs are required. Include an earlier completed dataset or upload more designs.");
-    $("review-panel").hidden=!job.evaluation;
-    if(job.evaluation)await review(job);
-    if(selected!==id)return;
-    $("publish-form").hidden=!job.evaluation||!["complete","publish_failed"].includes(job.state);
-    $("publication-result").textContent=job.state==="published"?(job.publication?.deployment?.state==="hosted_verified"?"Published and verified on the hosted website.":"Published to the local Predictor. Reload the Predictor to select this version."):"";
-    if(running)timer=setTimeout(()=>openJob(id).catch(e=>{error("run-error",`${e.message} Refresh to reconnect; the worker may still be running.`);}),3000);
+  $('analyze').addEventListener('click',()=>analyze(''));
+  $('answer').addEventListener('click',()=>{if(!$('prep-answer').value.trim()){error('prep-error','Enter an answer or correction.');return;}analyze($('prep-answer').value);});
+  $('accept').addEventListener('click',async()=>{const b=$('accept');b.disabled=true;try{const job=await request(`smart/${preparation.id}/accept`,{reviewed:true});await refresh();await openJob(job.id);}catch(e){error('prep-error',e.message);}finally{b.disabled=false;}});
+  async function artifact(id,name){const info=await request(`jobs/${id}/artifacts/${name}`);const r=await fetch(info.download_url);if(!r.ok)throw new Error('Report download failed. Refresh to retry.');return r;}
+  async function openJob(id){clearTimeout(timer);if(selected!==id)loaded=null;selected=id;$('upload-panel').hidden=true;$('run-panel').hidden=false;error('run-error','');
+    const job=await request(`jobs/${id}`);if(selected!==id)return;if(job.state==='archived'){$('run-panel').hidden=true;await refresh();return;}
+    $('run-title').textContent=`v${job.version||'?'} · ${job.name}`;$('run-state').textContent=job.state.replaceAll('_',' ');$('run-counts').textContent=`${job.summary?.specimens||0} specimens / ${job.summary?.design_groups||0} designs`;
+    $('run-summary').textContent=job.condition_note||`Inputs: ${(job.summary?.features||[]).join(', ')}`;error('run-error',job.error||'');
+    const running=['validating','training','publishing'].includes(job.state),progress=job.progress||{};
+    $('run-progress').textContent=running?(job.state==='training'&&progress.total_folds?`Validating design ${progress.completed_folds} of ${progress.total_folds}`:`${job.state} in the cloud…`):'';
+    $('start-training').hidden=job.state!=='validated';$('start-training').disabled=!job.summary?.training_minimum_met;
+    $('review-panel').hidden=!(job.evaluation||job.historical);$('publish-panel').hidden=!['complete','publish_failed'].includes(job.state)||job.historical;
+    $('remove-panel').hidden=running;$('publication-result').textContent=job.state==='published'?'Available in Predictor. Reload Predictor to select this version.':'';
+    if((job.evaluation||job.historical)&&loaded!==id){
+      $('figures').replaceChildren();$('metrics').replaceChildren();$('report-links').replaceChildren();$('reviewed').checked=false;
+      const evaluation=job.evaluation;if(evaluation){$('validation-method').textContent=evaluation.method;const table=node('table',undefined,'metrics'),head=node('tr');['Output','Held-out MAE','R²','Baseline MAE'].forEach(x=>head.append(node('th',x)));table.append(head);Object.entries(evaluation.metrics||{}).forEach(([n,m])=>{const row=node('tr');[n.replaceAll('_',' '),Number(m.mae).toPrecision(4),m.r2==null?'Not estimable':Number(m.r2).toFixed(3),evaluation.mean_baseline?.[n]?.mae==null?'See report':Number(evaluation.mean_baseline[n].mae).toPrecision(4)].forEach(x=>row.append(node('td',x)));table.append(row);});$('metrics').append(table);}else $('validation-method').textContent='Historical validation: see the versioned report for methods and caveats.';
+      const report=await (await artifact(id,'REPORT.md')).text();if(selected!==id)return;$('training-report').textContent=report;
+      for(const [name,caption] of [['validation.png','Measured versus held-out predicted outcomes'],['measured_force_vs_parameters.png','Measured plateau force by parameter'],['measured_length_vs_parameters.png','Measured plateau length by parameter']]){const blob=await(await artifact(id,name)).blob();if(selected!==id)return;const url=URL.createObjectURL(blob);urls.push(url);const fig=node('figure'),img=node('img');img.src=url;img.alt=caption;fig.append(node('figcaption',caption),img);$('figures').append(fig);}
+      loaded=id;
+    }
+    if(running)timer=setTimeout(()=>openJob(id).catch(e=>error('run-error',e.message+' Refresh to reconnect.')),5000);
   }
-  $("start-training").addEventListener("click",async()=>{const b=$("start-training");b.disabled=true;try{await request(`jobs/${selected}/train`,{});await openJob(selected);await refresh();}catch(e){error("run-error",e.message);}finally{b.disabled=false;}});
-  $("deploy-hosted").addEventListener("change",()=>{$("publish-button").textContent=$("deploy-hosted").checked?"Publish and deploy to website":"Publish to local Predictor";});
-  $("publish-form").addEventListener("submit",async event=>{event.preventDefault();error("publish-error","");const b=$("publish-button");b.disabled=true;
-    try{await request(`jobs/${selected}/publish`,{slug:$("publish-slug").value,name:$("publish-name").value,reviewed:$("reviewed").checked,deploy:$("deploy-hosted").checked});await openJob(selected);await refresh();}
-    catch(e){error("publish-error",e.message);}finally{b.disabled=false;}});
-  if(base===null){$("connect-form").hidden=true;$("connection-note").textContent="This hosted page has no training worker connected. Start the worker on your PC and open its training workspace.";const a=node("a","Open this PC’s training workspace");a.href="http://127.0.0.1:8765/training.html";$("connection").append(a);}
-  else if(sessionStorage.getItem(tokenKey)){$("admin-token").value=sessionStorage.getItem(tokenKey);connect();}
-  window.addEventListener("beforeunload",()=>blobs.forEach(u=>URL.revokeObjectURL(u)));
+  async function runAction(button,action,payload){button.disabled=true;try{await request(`jobs/${selected}/${action}`,payload);loaded=null;await refresh();await openJob(selected);}catch(e){error('run-error',e.message);}finally{button.disabled=false;}}
+  $('start-training').addEventListener('click',()=>runAction($('start-training'),'train',{}));
+  $('publish').addEventListener('click',()=>{const j=jobs.find(j=>j.id===selected);runAction($('publish'),'publish',{reviewed:$('reviewed').checked,slug:`${campaign()}-v${j.version}`,name:`${campaign()} v${j.version}`});});
+  $('remove-version').addEventListener('click',async()=>{if(!$('remove-confirm').checked){error('run-error','Confirm removal and its effect on dependent versions first.');return;}const b=$('remove-version');b.disabled=true;try{await request(`jobs/${selected}/archive`,{confirmed:true,reason:$('remove-reason').value});selected=null;loaded=null;$('run-panel').hidden=true;$('remove-confirm').checked=false;await refresh();}catch(e){error('run-error',e.message);}finally{b.disabled=false;}});
+  if(sessionStorage.getItem(tokenKey)){$('admin-token').value=sessionStorage.getItem(tokenKey);$('connect-form').requestSubmit();}
+  window.addEventListener('beforeunload',()=>urls.forEach(u=>URL.revokeObjectURL(u)));
 })();

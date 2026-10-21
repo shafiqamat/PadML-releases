@@ -692,7 +692,7 @@ async function selectModel(slug) {
   const isDoe = state.model.input_kind === "recurved_doe";
   $("model-family").textContent = state.model.family_label ? state.model.family_label :
     (state.model.design_family ? `${state.model.design_family} only` : "");
-  $("design-form-title").textContent = isDoe ? "Campaign 3 DOE parameters" : "Chevron parameters";
+  $("design-form-title").textContent = isDoe ? "Measured design parameters" : "Chevron parameters";
   $("design-form").querySelector(".hint").textContent = isDoe
     ? `Enter the ${state.model.parameter_order.length} nominal DOE parameters. Values outside tested ranges are rejected. In-range combinations absent from the experiment are flagged.`
     : "Left and right struts are mirrored. Angles are the leg's inner edge to the interface. Widths are each leg's mean horizontal width.";

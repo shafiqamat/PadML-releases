@@ -1,95 +1,24 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Training workspace · PadML</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="training.css">
-  <script src="config.js" defer></script><script src="training.js" defer></script>
-</head>
-<body class="training-page">
-  <a class="skip-link" href="#training-main">Skip to training workspace</a>
-  <header class="topbar"><div class="brand"><p class="eyebrow">PadML / Campaign 3</p><h1>Training workspace</h1>
-    <p class="tagline">Turn physical test results into a versioned prediction model.</p></div>
-    <a href="index.html" class="back-link">Back to Predictor</a></header>
-  <main id="training-main" class="training-main">
-    <ol class="workflow" aria-label="Workflow"><li>01 <span>Check your data</span></li><li>02 <span>Train</span></li><li>03 <span>Review results</span></li><li>04 <span>Publish a version</span></li></ol>
-    <section id="connection" class="connection" aria-labelledby="connection-title">
-      <div><h2 id="connection-title">Connect to your training worker</h2><p id="connection-note">Jobs run on the worker, so you can close this page and return later.</p></div>
-      <form id="connect-form"><label for="admin-token">Training administrator token</label>
-        <div class="connection-fields"><input id="admin-token" type="password" autocomplete="current-password" required><button class="primary" type="submit">Connect</button></div></form>
-      <p id="connection-error" class="error" role="alert" hidden></p><p id="connection-status" role="status"></p>
-    </section>
-    <div id="workspace" class="workspace-grid" hidden>
-      <aside class="job-sidebar" aria-labelledby="jobs-title"><div class="sidebar-heading"><h2 id="jobs-title">Your runs</h2><button type="button" id="refresh-jobs">Refresh</button></div>
-        <p class="hint">Each run keeps its own data, models and results.</p><div id="job-list"></div>
-        <button id="new-upload" type="button">New upload</button><button id="disconnect" type="button">Disconnect</button></aside>
-      <div class="work-area">
-        <section id="upload-panel" aria-labelledby="upload-title">
-          <p class="eyebrow">01 / Data preparation</p><h2 id="upload-title">Upload your test batch</h2>
-          <p>One design row per unique geometry. Repeated specimens must reference the same design ID.</p>
-          <button id="get-template" type="button">Get the upload template</button><div id="template-links" class="download-links"></div>
-          <details id="ai-preparation">
-            <summary>Prepare CSV files with AI</summary>
-            <p>GPT-6 Luna (medium reasoning) suggests column mappings. Python converts units and preserves every measurement and its original order.</p>
-            <p id="prep-availability" role="status">Connect to cloud training to check availability.</p>
-            <p class="hint">Supply three CSV tables with headers: designs, specimen-to-design mappings, and long-form curves. Missing IDs or metadata must be supplied by you. Export Excel sheets as UTF-8 CSV first.</p>
-            <div class="upload-grid">
-              <div><label for="prep-designs">Raw design table</label><input id="prep-designs" type="file" accept=".csv"></div>
-              <div><label for="prep-specimens">Raw specimen mapping table</label><input id="prep-specimens" type="file" accept=".csv"></div>
-              <div><label for="prep-curves">Raw curve table</label><input id="prep-curves" type="file" accept=".csv"></div>
-              <div><label for="prep-manifest">Optional batch.json with extra variables</label><input id="prep-manifest" type="file" accept=".json"></div>
-            </div>
-            <label for="prep-notes">Column meanings and source units</label><textarea id="prep-notes" rows="3" maxlength="4000" placeholder="For example: Travel is measured in mm; Load is measured in N."></textarea>
-            <label class="check-line"><input id="prep-consent" type="checkbox"> Send column names and the first three rows of each table to OpenAI to suggest a mapping. API usage is billed separately from AWS.</label>
-            <button id="prep-suggest" type="button" disabled>Suggest column mappings</button>
-            <p id="prep-status" role="status" aria-live="polite"></p><p id="prep-error" class="error" role="alert" hidden></p>
-            <div id="prep-review" hidden><h3>Review the proposed mapping</h3><div id="prep-warnings"></div>
-              <p>Check each source column and conversion. Unmapped targets need a source column; correct your CSV and retry if the information is missing.</p>
-              <div id="prep-mappings" class="table-wrap"></div>
-              <label class="check-line"><input id="prep-reviewed" type="checkbox"> I checked every mapping, source unit, specimen ID and replicate group.</label>
-              <button id="prep-apply" type="button">Prepare files for training</button><div id="prep-downloads" class="download-links"></div>
-            </div>
-          </details>
-          <form id="upload-form">
-            <label for="run-name">Run name</label><input id="run-name" required maxlength="120" placeholder="Campaign 3 · Screening 3">
-            <label for="base-run">Include data from an earlier run</label><select id="base-run"><option value="">New dataset — uploaded data only</option></select>
-            <div class="upload-grid">
-              <div><label for="manifest-file">Settings · batch.json</label><input id="manifest-file" type="file" accept=".json" required><p class="hint">Variables, units and test conditions.</p></div>
-              <div><label for="designs-file">Designs · designs.csv</label><input id="designs-file" type="file" accept=".csv" required><p class="hint">Nominal parameters for each design.</p></div>
-              <div><label for="specimens-file">Specimens · specimens.csv</label><input id="specimens-file" type="file" accept=".csv" required><p class="hint">Test-to-design mapping and source IDs.</p></div>
-              <div><label for="curves-file">Raw curves · curves.csv</label><input id="curves-file" type="file" accept=".csv" required><p class="hint">Displacement in inches and force in lbf. Total upload limit: 64 MB.</p></div>
-            </div>
-            <fieldset><legend>Confirm the experiment</legend><p class="hint">These facts must match across all data included in the run.</p>
-              <div class="condition-grid"><div><label for="material">Material</label><input id="material" required></div><div><label for="fixture">Fixture</label><input id="fixture" required></div>
-                <div><label for="speed">Test speed (in/min)</label><input id="speed" type="number" min="0.000001" step="any" required></div></div>
-              <label class="check-line"><input id="mapping-verified" type="checkbox" required> I checked specimen IDs, design mappings and replicate groups.</label>
-              <label class="check-line"><input id="condition-verified" type="checkbox" required> I confirmed the material, fixture, speed and 0.8 in stroke.</label>
-            </fieldset>
-            <p id="upload-error" class="error" role="alert" hidden></p><button id="validate-upload" class="primary" type="submit">Check data</button>
-          </form>
-        </section>
-        <section id="run-panel" aria-labelledby="run-title" hidden><p class="eyebrow">Run details</p><h2 id="run-title"></h2>
-          <div class="run-state"><span id="run-state"></span><span id="run-counts"></span></div>
-          <div id="progress-section" hidden><progress id="run-progress"></progress><p id="run-progress-text" role="status" aria-live="polite"></p></div>
-          <p id="run-error" class="error" role="alert" hidden></p><div id="run-summary"></div>
-          <button id="start-training" type="button" class="primary" hidden>Start training</button>
-          <div id="review-panel" hidden><h3>Review the result</h3><p>Errors below use held-out designs. Lower MAE is better; compare it with the mean baseline.</p>
-            <div id="metrics" class="table-wrap"></div><div id="report-links" class="download-links"></div>
-            <details><summary>Read the training report</summary><pre id="training-report"></pre></details>
-            <div id="figures"></div>
-            <form id="publish-form"><h3>Publish this version</h3><p>Adds a model to the Predictor. The current default stays selected.</p>
-              <label for="publish-name">Model display name</label><input id="publish-name" required maxlength="120">
-              <label for="publish-slug">Unique version slug</label><input id="publish-slug" required pattern="[a-z0-9][a-z0-9-]{0,95}" placeholder="campaign3-screening3-v5">
-              <label class="check-line"><input id="reviewed" type="checkbox" required> I reviewed the validation report and all three plots.</label>
-              <label class="check-line"><input id="deploy-hosted" type="checkbox"> Also deploy to the hosted website</label><p id="deployment-note" class="hint"></p>
-              <p id="publish-error" class="error" role="alert" hidden></p><button id="publish-button" type="submit" class="primary">Publish to local Predictor</button>
-            </form>
-          </div>
-          <p id="publication-result" role="status"></p>
-        </section>
-      </div>
-    </div>
-  </main>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign workspace · PadML</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="training.css"><script src="config.js" defer></script><script src="training.js" defer></script></head>
+<body class="training-page"><a class="skip-link" href="#training-main">Skip to workspace</a>
+<header class="topbar"><div class="brand"><p class="eyebrow">PadML / Experiments</p><h1>Campaign workspace</h1><p class="tagline">Your data, models and measured results—one version at a time.</p></div><a href="index.html" class="back-link">Open Predictor</a></header>
+<main id="training-main" class="training-main">
+<ol class="workflow" aria-label="Workflow"><li>01 <span>Drop data</span></li><li>02 <span>Resolve questions</span></li><li>03 <span>Train and review</span></li><li>04 <span>Publish to Predictor</span></li></ol>
+<section class="connection"><h2>Connect to the team workspace</h2><form id="connect-form"><label for="admin-token">Team password</label><div class="connection-fields"><input id="admin-token" type="password" autocomplete="current-password" required><button class="primary">Connect</button></div></form><p id="connection-status" role="status"></p><p id="connection-error" class="error" role="alert" hidden></p></section>
+<div id="workspace" hidden><div class="campaign-toolbar"><div><label for="campaign-number">Campaign</label><input id="campaign-number" type="number" min="1" max="9999" value="3"></div><button id="refresh" type="button">Refresh</button><button id="new-upload" type="button">New upload</button><button id="disconnect" type="button">Disconnect</button></div>
+<section id="campaign-dashboard"><h2 id="campaign-title">Campaign 3</h2><p id="campaign-summary"></p><div id="version-list" class="version-grid"></div><details><summary>Removed versions</summary><div id="archived-list"></div></details></section>
+<section id="upload-panel" class="work-area"><p class="eyebrow">New dataset</p><h2>Drop your experiment files</h2><p>Upload CSV tables, Excel workbooks, or a ZIP of your data. Luna identifies the tables and asks about missing information. Keep the 0.8-inch stroke; different materials and geometry families use separate datasets.</p>
+<label for="run-name">Run name</label><input id="run-name" maxlength="120" placeholder="Screening 3">
+<label for="base-run">Include data from an earlier run</label><select id="base-run"><option value="">New dataset—uploaded data only</option></select><p id="base-note" class="hint"></p>
+<label id="drop-zone" class="drop-zone" for="raw-files"><strong>Drag files here or choose files</strong><span>CSV, TSV, XLSX, JSON, TXT, MD or ZIP · 64 MB total</span><input id="raw-files" type="file" multiple accept=".csv,.tsv,.xlsx,.json,.txt,.md,.zip"></label><ul id="file-list"></ul>
+<label for="prep-notes">Anything Luna should know?</label><textarea id="prep-notes" rows="4" maxlength="8000" placeholder="Describe the experiment, units, material, fixture, speed, or how test IDs match designs. You can answer missing details later."></textarea>
+<p class="hint">Luna receives filenames, headers, three sample rows per table, metadata files and your notes. Python preserves and checks all measurements. OpenAI usage is billed separately from AWS. CAD files, PDFs and images are not supported here.</p>
+<label class="check-line"><input id="prep-consent" type="checkbox"> Share these samples and notes with OpenAI to prepare this dataset.</label><button id="analyze" type="button" class="primary" disabled>Prepare with Luna</button><p id="prep-availability" role="status"></p><p id="prep-status" role="status" aria-live="polite"></p><p id="prep-error" class="error" role="alert" hidden></p>
+<section id="conversation" hidden><h3>Luna’s data review</h3><div id="questions"></div><div id="answer-area"><label for="prep-answer">Your answer or corrections</label><textarea id="prep-answer" rows="4" maxlength="8000"></textarea><button id="answer" type="button">Send answer to Luna</button></div><div id="prepared-summary"></div><details><summary>Inspect the proposed mapping</summary><pre id="mapping-plan"></pre></details><button id="accept" type="button" class="primary" hidden>Use this prepared dataset</button><p class="hint">Using the prepared dataset confirms the displayed mappings and test conditions. Python validates it again before training.</p></section>
+</section>
+<section id="run-panel" class="work-area" hidden><p class="eyebrow">Dataset version</p><h2 id="run-title"></h2><div class="run-state"><span id="run-state"></span><span id="run-counts"></span></div><p id="run-summary"></p><p id="run-error" class="error" role="alert" hidden></p><p id="run-progress" role="status" aria-live="polite"></p><button id="start-training" class="primary" type="button" hidden>Train this version</button>
+<div id="review-panel" hidden><h3>Validation and measured data</h3><p id="validation-method"></p><div id="metrics" class="table-wrap"></div><details><summary>Read the report</summary><pre id="training-report"></pre></details><div id="figures"></div><div id="report-links" class="download-links"></div></div>
+<section id="publish-panel" hidden><h3>Make this version available in Predictor</h3><p>Training creates a candidate. Publishing adds its version to the Predictor model selector. Earlier versions remain available and the default stays unchanged.</p><label class="check-line"><input id="reviewed" type="checkbox"> I reviewed the report and all three graphs.</label><button id="publish" type="button" class="primary">Publish to Predictor</button></section><p id="publication-result" role="status"></p>
+<details id="remove-panel"><summary>Remove this version and its dataset from active use</summary><p>This also removes versions trained from this dataset from active use and the Predictor. Private files are retained in a recoverable archive; this does not permanently erase S3 storage.</p><label for="remove-reason">Reason for removal</label><input id="remove-reason" maxlength="500" placeholder="Incorrect test-to-design mapping"><label class="check-line"><input id="remove-confirm" type="checkbox"> Remove this version and all dependent versions from active use.</label><button id="remove-version" type="button">Remove version and data</button></details>
+</section></div></main></body></html>
