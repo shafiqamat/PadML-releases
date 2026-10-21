@@ -1,0 +1,30 @@
+.training-page {font-size:16px;line-height:1.5}
+.training-main {max-width:1380px;margin:auto;padding:1.5rem 2rem 4rem}
+.training-page h1 {font-size:2rem;letter-spacing:-.035em}.training-page h2 {font-size:1.5rem;letter-spacing:-.025em}
+.eyebrow {font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 .4rem}
+.workflow {display:flex;list-style:none;padding:0;margin:0 0 2rem;border-bottom:1px solid var(--line);gap:2rem;flex-wrap:wrap}
+.workflow li {padding:0 0 1rem;font-variant-numeric:tabular-nums;color:var(--accent)}.workflow span {color:var(--ink);margin-left:.5rem}
+.connection {background:var(--card);padding:1.5rem 2rem;border-left:3px solid var(--accent);margin-bottom:2rem}
+.connection form {max-width:560px}.connection-fields {display:flex;gap:.75rem;align-items:center}.connection-fields input {flex:1;min-width:0}
+.workspace-grid {display:grid;grid-template-columns:250px minmax(0,1fr);gap:2.5rem}.workspace-grid[hidden] {display:none}
+.job-sidebar {border-right:1px solid var(--line);padding-right:1.5rem}.sidebar-heading {display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.sidebar-heading h2 {font-size:1.15rem}.job-sidebar button {width:100%;text-align:left;margin-bottom:.5rem}.sidebar-heading button {width:auto;text-align:center}
+.job-item {display:block;padding:.8rem;white-space:normal}.job-item small {display:block;color:var(--muted);margin-top:.2rem}.job-item[aria-current=true] {border-color:var(--accent);background:#eaf1fc}
+.work-area {background:var(--card);padding:2rem;min-width:0}.work-area p {max-width:75ch}.work-area h2 {margin-top:0}
+.work-area label,.connection label {display:block;font-weight:600;margin:.8rem 0 .35rem}.work-area input:not([type=checkbox]),.work-area select {width:100%;box-sizing:border-box}
+.upload-grid,.condition-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.1rem 1.5rem;margin:1.5rem 0}
+.condition-grid {grid-template-columns:repeat(3,minmax(0,1fr))}.training-page input[type=file] {font-size:.875rem;border:1px dashed var(--line);padding:.8rem;background:var(--bg)}
+.training-page .check-line {display:flex;align-items:flex-start;gap:.6rem;font-weight:400;cursor:pointer}.check-line input {flex:none;margin-top:.35rem}
+.training-page button,.training-page input,.training-page select,.back-link,.download-links a {min-height:44px}.training-page button {white-space:normal}
+.training-page button:focus-visible,.training-page a:focus-visible,.training-page input:focus-visible,.training-page select:focus-visible,.training-page summary:focus-visible {outline:3px solid var(--accent);outline-offset:3px}
+.training-page button:disabled {opacity:.55;cursor:not-allowed}.training-page fieldset {margin:1.5rem 0;border:1px solid var(--line);padding:1rem}
+.run-state {display:flex;gap:1rem;justify-content:space-between;border-block:1px solid var(--line);padding:.8rem 0;margin:1rem 0;font-variant-numeric:tabular-nums}
+#run-state {font-weight:600}#run-counts {color:var(--muted)}progress {width:100%;height:12px;accent-color:var(--accent);margin-top:1rem}
+.download-links {display:flex;gap:.5rem 1rem;flex-wrap:wrap;margin:1rem 0}.download-links a {display:inline-flex;align-items:center}
+#training-report {white-space:pre-wrap;overflow-wrap:anywhere;font: .9rem/1.6 "Segoe UI",sans-serif;background:var(--bg);padding:1rem;max-height:500px;overflow:auto}
+#figures figure {margin:2rem 0;border-top:1px solid var(--line);padding-top:1rem}#figures img {width:100%;height:auto}#figures figcaption {font-weight:600;margin-bottom:.5rem}
+#publish-form {border-top:2px solid var(--line);margin-top:2rem;padding-top:1rem}.training-page summary {cursor:pointer;padding:.75rem 0}
+.back-link {display:inline-flex;align-items:center}.skip-link {position:absolute;top:-100px}.skip-link:focus {top:0;background:var(--card);padding:1rem;z-index:10}
+@media(max-width:850px){.workspace-grid{grid-template-columns:1fr;gap:1rem}.job-sidebar{border-right:0;border-bottom:1px solid var(--line);padding:0 0 1rem}.job-sidebar #job-list{max-height:240px;overflow:auto}.training-main{padding:1rem}.work-area,.connection{padding:1.2rem}.condition-grid{grid-template-columns:1fr}.workflow{gap:1rem}.run-state{flex-direction:column;gap:.3rem}}
+@media(max-width:520px){.upload-grid{grid-template-columns:1fr}.connection-fields{flex-direction:column;align-items:stretch}.training-page .topbar{align-items:flex-start}.workflow{font-size:.85rem}}
+.training-page [hidden] { display: none !important; }

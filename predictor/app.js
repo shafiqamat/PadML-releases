@@ -156,20 +156,21 @@ function buildForm() {
   container.replaceChildren();
   if (state.model && state.model.input_kind === "recurved_doe") {
     const parameters = state.model.parameter_order.map((name) => ({
-      name, label: name.replaceAll("_", " "),
+      name, label: name.replace(/_(in|deg)$/, '').replaceAll("_", " "),
       min: state.model.input_ranges[name].min, max: state.model.input_ranges[name].max,
       default: state.model.fixed_parameters?.[name] ?? state.model.input_ranges[name].min,
       fixed: state.model.fixed_parameters?.[name],
+      unit: state.model.variables?.find((v) => v.name === name)?.unit ?? (name.endsWith('_deg') ? 'deg' : name.endsWith('_in') ? 'in' : ''),
     }));
     for (const p of parameters) {
       const id = `param-${p.name}`;
       const fixed = p.fixed !== undefined;
       const input = el("input", { id, name: p.name, type: "number", min: p.min, max: p.max,
-        step: p.name.endsWith("_deg") ? 1 : 0.001, value: fixed ? p.fixed : p.default,
+        step: 'any', value: fixed ? p.fixed : p.default,
         required: true, ...(fixed ? { readOnly: true } : {}), "aria-describedby": `${id}-range` });
       input.addEventListener("input", () => { if (!fixed) showError("form-error", ""); });
-      container.append(el("div", { class: "field-row" }, el("label", { for: id, text: `${p.label}${p.name.endsWith("_deg") ? " (deg)" : p.name.endsWith("_in") ? " (in)" : ""}` }), input,
-        el("span", { class: "range", id: `${id}-range`, text: fixed ? `Fixed at ${p.fixed} in` : `Tested ${p.min} to ${p.max}` })));
+      container.append(el("div", { class: "field-row" }, el("label", { for: id, text: `${p.label}${p.unit ? ` (${p.unit})` : ''}` }), input,
+        el("span", { class: "range", id: `${id}-range`, text: fixed ? `Fixed at ${p.fixed} ${p.unit}` : `Tested ${fmt(p.min, 4)} to ${fmt(p.max, 4)}` })));
     }
     return;
   }
@@ -657,12 +658,17 @@ function renderAbout(model) {
           (model.target_definitions || {})[t.name] || ""))),
         el("h3", { text: "Inputs" }),
         el("p", { text: model.input_kind === "recurved_doe"
-          ? `Eight nominal DOE parameters. Family: ${model.family_label}. Target definition: ${model.target_definition_id}.`
+          ? `${model.parameter_order.length} nominal DOE parameters. Family: ${model.family_label}. Target definition: ${model.target_definition_id}.`
           : `${model.feature_count} geometry features (${model.feature_set}) measured by PadML Studio. Family: ${model.family_label || model.design_family || "any"}. Estimator: ${model.estimator}, ${model.training_count} training designs.` })),
       el("div", {},
         el("h3", { text: "Accuracy" }),
         accuracy.method ? el("p", { class: "hint", text: accuracy.method }) : null,
         recurvedMetrics,
+        accuracy.nested_lodo ? el('table', {class:'metrics'},
+          el('thead', {}, el('tr', {}, ['Output','Held-out MAE','R²'].map(t => el('th',{text:t})))),
+          el('tbody', {}, Object.entries(accuracy.nested_lodo).map(([name,m]) => el('tr', {},
+            el('td',{text:name.replaceAll('_',' ')}), el('td',{text:fmt(m.mae,4)}),
+            el('td',{text:m.r2 === null ? 'Not estimable' : fmt(m.r2,3)}))))) : null,
         cv.length ? el("p", { class: "hint", text: (accuracy.cross_validation || {}).method || "" }) : null,
         cv.length ? el("table", { class: "metrics" },
           el("tr", {}, ["Target", "MAE", "RMSE", "R²", "Plateau length MAE"].map((h) => el("th", { text: h }))),
@@ -688,7 +694,7 @@ async function selectModel(slug) {
     (state.model.design_family ? `${state.model.design_family} only` : "");
   $("design-form-title").textContent = isDoe ? "Campaign 3 DOE parameters" : "Chevron parameters";
   $("design-form").querySelector(".hint").textContent = isDoe
-    ? "Enter the 8 nominal DOE parameters. Values outside tested ranges are rejected. In-range combinations absent from the experiment are flagged."
+    ? `Enter the ${state.model.parameter_order.length} nominal DOE parameters. Values outside tested ranges are rejected. In-range combinations absent from the experiment are flagged.`
     : "Left and right struts are mirrored. Angles are the leg's inner edge to the interface. Widths are each leg's mean horizontal width.";
   $("load-reference").parentElement.hidden = isDoe;
   $("preview").closest(".card").hidden = isDoe;
@@ -725,10 +731,14 @@ async function selectModel(slug) {
 function buildInverseFields() {
   const host = $("inverse-fixed"); host.replaceChildren();
   if (state.model?.input_kind !== "recurved_doe") return;
-  for (const name of state.model.parameter_order.filter((n) => n !== "extrusion_depth_in")) {
+  const interfaceRange = state.model.input_ranges.interface_thickness_in;
+  const lockAvailable = interfaceRange && interfaceRange.min <= 0.02 && interfaceRange.max >= 0.02;
+  $('inverse-lock-interface').disabled = !lockAvailable;
+  $('inverse-lock-interface').checked = !!lockAvailable;
+  for (const name of state.model.parameter_order.filter((n) => state.model.fixed_parameters?.[n] === undefined)) {
     const bounds = state.model.input_ranges[name], id = `inverse-fix-${name}`;
     const check = el("input", { type: "checkbox", id: `${id}-check` });
-    const value = el("input", { type: "number", id, min: bounds.min, max: bounds.max, step: name.endsWith("_deg") ? 1 : 0.0025, value: bounds.min, disabled: true });
+    const value = el("input", { type: "number", id, min: bounds.min, max: bounds.max, step: 'any', value: bounds.min, disabled: true });
     check.addEventListener("change", () => { value.disabled = !check.checked; });
     if (name === "interface_thickness_in") value.addEventListener("input", () => {
       if (check.checked && Number(value.value) !== 0.02) $("inverse-lock-interface").checked = false;
@@ -742,7 +752,7 @@ function inverseRequest() {
   const fixed_parameters = {};
   for (const name of state.model.parameter_order) {
     if (name === "extrusion_depth_in") continue;
-    if ($(`inverse-fix-${name}-check`).checked) fixed_parameters[name] = number(`inverse-fix-${name}`);
+    if ($(`inverse-fix-${name}-check`)?.checked) fixed_parameters[name] = number(`inverse-fix-${name}`);
   }
   const body = { model: state.model.slug, target_force_lbf: number("inverse-force"), target_length_in: number("inverse-length"),
     tol_force: number("inverse-tol-force"), tol_length: number("inverse-tol-length"), tol_energy: number("inverse-tol-energy"),
@@ -755,7 +765,7 @@ const CHANCE_TOOLTIP = "Model estimate that a build of this design lands within 
 
 const MATCH_TOOLTIP = "Relative 0–1 score for ranking candidate matches; not a calibrated probability. Feasibility labels summarize cumulative held-out hit rates at default force/length tolerances, not the success chance of an individual build.";
 
-function chanceTooltip(data) { return data.probability_mode === "match_score" ? MATCH_TOOLTIP : CHANCE_TOOLTIP; }
+function chanceTooltip(data) { return data.method === 'manifest-match-v1' ? 'Relative target-match score based on prediction error divided by your tolerances. Not a calibrated probability.' : data.probability_mode === "match_score" ? MATCH_TOOLTIP : CHANCE_TOOLTIP; }
 function chanceLabel(data) { return data.probability_mode === "match_score" ? "Match score" : "Chance of hitting all targets"; }
 function chanceText(data, value) { return data.probability_mode === "match_score" ? fmt(value, 3) : `${(100*value).toFixed(1)}%`; }
 
@@ -784,7 +794,7 @@ function renderInverseResults(host, data, allowUse = true) {
       x === label ? el("th", { text: x, title: chanceTooltip(data) }) : el("th", { text: x })))),
     el("tbody", {}, body.map((row) => el("tr", {}, row.map((cell) => el("td", {}, cell))))));
   const extras=[];
-  if (data.probability_mode === "match_score") extras.push(el("p", { class: "hint", text: "Feasibility labels are screening aids, not validated build probabilities. Labels for energy-inclusive requests or changed tolerances have not been validated." }));
+  if (data.probability_mode === "match_score" && data.method !== 'manifest-match-v1') extras.push(el("p", { class: "hint", text: "Feasibility labels are screening aids, not validated build probabilities. Labels for energy-inclusive requests or changed tolerances have not been validated." }));
   if (data.closest_point) extras.push(el("p", { class: "hint", text: `Closest predicted point: force ${fmt(data.closest_point.predicted.force_lbf)} lbf, length ${fmt(data.closest_point.predicted.length_in)} in. Missed: ${(data.closest_point.missed_targets || []).map((x) => `${x.target} by ${fmt(x.missed_by)} (${x.direction})`).join("; ") || "no target outside tolerance"}.` }));
   if (data.unfixed_comparison) {
     const diff = data.unfixed_comparison.p_hit_difference_fixed_minus_unfixed;
@@ -793,7 +803,7 @@ function renderInverseResults(host, data, allowUse = true) {
   }
   host.replaceChildren(...(data.warning ? [el("p", { class: "error", text: data.warning })] : []),
     el("p", { class: "result-summary", title: data.feasibility ? chanceTooltip(data) : null, text: data.feasibility ? `${data.feasibility} — best ${label.toLowerCase()} ${chanceText(data, data.best_p_hit)}.` : `Strategy: ${data.strategy}.` }),
-    ...extras, el("div", { class: "table-wrap" }, table), el("p", { class: "hint", text: `${label}: ${chanceTooltip(data)}` }), el("p", { class: "hint", text: "Typical errors are about 3 lbf for force and 0.045 in for length; length differences under about 0.09 in are not reliably resolved. The ±1.96σ ranges assume normal errors and are not demonstrated 95% coverage intervals. Confirm suggestions with CAD checks and physical testing." }));
+    ...extras, el("div", { class: "table-wrap" }, table), el("p", { class: "hint", text: `${label}: ${chanceTooltip(data)}` }), el("p", { class: "hint", text: data.method === "manifest-match-v1" ? data.assumption : "Typical errors are about 3 lbf for force and 0.045 in for length; length differences under about 0.09 in are not reliably resolved. The ±1.96σ ranges assume normal errors and are not demonstrated 95% coverage intervals. Confirm suggestions with CAD checks and physical testing." }));
 }
 
 async function runInverse() {
