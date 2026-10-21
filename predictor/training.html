@@ -29,6 +29,28 @@
           <p class="eyebrow">01 / Data preparation</p><h2 id="upload-title">Upload your test batch</h2>
           <p>One design row per unique geometry. Repeated specimens must reference the same design ID.</p>
           <button id="get-template" type="button">Get the upload template</button><div id="template-links" class="download-links"></div>
+          <details id="ai-preparation">
+            <summary>Prepare CSV files with AI</summary>
+            <p>GPT-6 Luna (medium reasoning) suggests column mappings. Python converts units and preserves every measurement and its original order.</p>
+            <p id="prep-availability" role="status">Connect to cloud training to check availability.</p>
+            <p class="hint">Supply three CSV tables with headers: designs, specimen-to-design mappings, and long-form curves. Missing IDs or metadata must be supplied by you. Export Excel sheets as UTF-8 CSV first.</p>
+            <div class="upload-grid">
+              <div><label for="prep-designs">Raw design table</label><input id="prep-designs" type="file" accept=".csv"></div>
+              <div><label for="prep-specimens">Raw specimen mapping table</label><input id="prep-specimens" type="file" accept=".csv"></div>
+              <div><label for="prep-curves">Raw curve table</label><input id="prep-curves" type="file" accept=".csv"></div>
+              <div><label for="prep-manifest">Optional batch.json with extra variables</label><input id="prep-manifest" type="file" accept=".json"></div>
+            </div>
+            <label for="prep-notes">Column meanings and source units</label><textarea id="prep-notes" rows="3" maxlength="4000" placeholder="For example: Travel is measured in mm; Load is measured in N."></textarea>
+            <label class="check-line"><input id="prep-consent" type="checkbox"> Send column names and the first three rows of each table to OpenAI to suggest a mapping. API usage is billed separately from AWS.</label>
+            <button id="prep-suggest" type="button" disabled>Suggest column mappings</button>
+            <p id="prep-status" role="status" aria-live="polite"></p><p id="prep-error" class="error" role="alert" hidden></p>
+            <div id="prep-review" hidden><h3>Review the proposed mapping</h3><div id="prep-warnings"></div>
+              <p>Check each source column and conversion. Unmapped targets need a source column; correct your CSV and retry if the information is missing.</p>
+              <div id="prep-mappings" class="table-wrap"></div>
+              <label class="check-line"><input id="prep-reviewed" type="checkbox"> I checked every mapping, source unit, specimen ID and replicate group.</label>
+              <button id="prep-apply" type="button">Prepare files for training</button><div id="prep-downloads" class="download-links"></div>
+            </div>
+          </details>
           <form id="upload-form">
             <label for="run-name">Run name</label><input id="run-name" required maxlength="120" placeholder="Campaign 3 · Screening 3">
             <label for="base-run">Include data from an earlier run</label><select id="base-run"><option value="">New dataset — uploaded data only</option></select>

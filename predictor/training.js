@@ -7,6 +7,7 @@
   const tokenKey = `padml-training-token:${base}`;
   let token = "", jobs = [], selected = null, deployment = false, timer = null, loadedReview = null, hosted = false;
   const blobs = [];
+  let preparation = null, preparationEpoch = 0;
   const node = (tag, text, cls) => { const n = document.createElement(tag); if(text !== undefined) n.textContent = text; if(cls) n.className=cls; return n; };
   const error = (id, message) => { $(id).textContent = message || ""; $(id).hidden = !message; };
   async function request(path, payload, raw=false) {
@@ -38,12 +39,59 @@
   async function connect(event) {
     if(event) event.preventDefault(); error("connection-error",""); token=$("admin-token").value;
     const button=$("connect-form").querySelector("button"); button.disabled=true;
-    try {await refresh(); sessionStorage.setItem(tokenKey,token); $("workspace").hidden=false; $("connection-status").textContent=hosted?"Connected to cloud training. Jobs continue when you close this tab.":"Connected. Your data and jobs stay on this worker.";}
+    try {await refresh(); sessionStorage.setItem(tokenKey,token); $("workspace").hidden=false; $("connection-status").textContent=hosted?"Connected to cloud training. Jobs continue when you close this tab.":"Connected. Your data and jobs stay on this worker.";
+      $("prep-suggest").disabled=true;
+      if(hosted){try{const capability=await request('preparation');$("prep-suggest").disabled=!capability.configured;$("prep-availability").textContent=capability.configured?'Ready: GPT-6 Luna · medium reasoning.':'AI preparation needs the server OpenAI API key. Standard uploads are available now.';}catch{$("prep-availability").textContent='AI preparation is unavailable. Standard uploads are available.';}}
+      else $("prep-availability").textContent='AI preparation is available on the hosted training workspace.';
+    }
     catch(e){error("connection-error",e.message); $("workspace").hidden=true;}
     finally{button.disabled=false;}
   }
   $("connect-form").addEventListener("submit",connect);
-  $("disconnect").addEventListener("click",()=>{clearTimeout(timer);sessionStorage.removeItem(tokenKey);token="";$("admin-token").value="";$("workspace").hidden=true;$("connection-status").textContent="Disconnected. Running jobs continue on the worker.";});
+  function clearPreparation(){preparation=null;preparationEpoch++;$("prep-review").hidden=true;$("prep-reviewed").checked=false;$("prep-downloads").replaceChildren();}
+  ["prep-designs","prep-specimens","prep-curves","prep-manifest","prep-notes"].forEach(id=>$(id).addEventListener('change',clearPreparation));
+  $("prep-suggest").addEventListener('click',async()=>{
+    error('prep-error','');clearPreparation();const epoch=preparationEpoch;const button=$("prep-suggest");button.disabled=true;
+    try{
+      if(!$("prep-consent").checked)throw new Error('Confirm sharing the column names and sample rows with OpenAI first.');
+      const raw=Object.fromEntries(['designs','specimens','curves'].map(n=>[n+'.csv',$("prep-"+n).files[0]]));
+      if(Object.values(raw).some(f=>!f))throw new Error('Choose all three raw CSV tables.');
+      if(Object.values(raw).reduce((n,f)=>n+f.size,0)>64*1024*1024)throw new Error('Upload exceeds 64 MB.');
+      const settings=$("prep-manifest").files[0];const manifest=settings?JSON.parse(await settings.text()):JSON.parse((await request('template')).files['batch.json']);
+      $("prep-status").textContent='Uploading to private storage…';
+      const upload=await request('preparation/uploads',{manifest,share_samples_with_openai:true,notes:$("prep-notes").value,sizes:Object.fromEntries(Object.entries(raw).map(([n,f])=>[n,f.size]))});
+      for(const [name,post] of Object.entries(upload.uploads)){const form=new FormData();Object.entries(post.fields).forEach(([k,v])=>form.append(k,v));form.append('file',raw[name],name);const r=await fetch(post.url,{method:'POST',body:form});if(!r.ok)throw new Error('Raw upload failed. Retry with a new preparation.');}
+      $("prep-status").textContent='Luna is reviewing column meanings and units. This can take up to two minutes…';
+      const result=await request(`preparation/${upload.id}/suggest`,{});if(epoch!==preparationEpoch)return;
+      preparation={id:upload.id,...result};$("prep-warnings").replaceChildren();
+      [...result.proposal.questions,...result.proposal.warnings].forEach(t=>$("prep-warnings").append(node('p',t,'hint')));
+      const table=node('table',undefined,'metrics'),header=node('tr');['Table','Training field','Source column','Conversion'].forEach(t=>header.append(node('th',t)));const head=node('thead');head.append(header);table.append(head);const body=node('tbody');
+      result.proposal.mappings.forEach(m=>{const row=node('tr');row.append(node('td',m.table),node('td',m.target));
+        const source=node('select');source.setAttribute('aria-label',`Source for ${m.table} ${m.target}`);source.append(new Option('Select a source column',''));result.profiles[m.table].columns.forEach(h=>source.append(new Option(h,h)));source.value=m.source||'';
+        const conversion=node('select');conversion.setAttribute('aria-label',`Conversion for ${m.target}`);[['identity','Keep original units'],['mm_to_in','mm → in'],['N_to_lbf','N → lbf'],['kN_to_lbf','kN → lbf'],['rad_to_deg','rad → deg']].forEach(([v,t])=>conversion.append(new Option(t,v)));conversion.value=m.conversion;
+        source.addEventListener('change',()=>{m.source=source.value||null;preparationEpoch++;$("prep-reviewed").checked=false;});conversion.addEventListener('change',()=>{m.conversion=conversion.value;preparationEpoch++;$("prep-reviewed").checked=false;});
+        const cell=node('td');cell.append(source);const unit=node('td');unit.append(conversion);row.append(cell,unit);body.append(row);
+      });table.append(body);$("prep-mappings").replaceChildren(table);$("prep-review").hidden=false;
+      $("prep-status").textContent='Mapping ready for review. No measurements have been changed.';
+    }catch(e){error('prep-error',e.message);$("prep-status").textContent='Preparation did not finish.';}finally{button.disabled=false;}
+  });
+  $("prep-apply").addEventListener('click',async()=>{
+    error('prep-error','');const button=$("prep-apply");button.disabled=true;const epoch=preparationEpoch;
+    try{
+      if(!preparation||!$("prep-reviewed").checked)throw new Error('Review and confirm the mapping first.');
+      $("prep-status").textContent='Python is preparing your files…';
+      const result=await request(`preparation/${preparation.id}/apply`,{proposal:preparation.proposal,reviewed:true});
+      const loaded=await Promise.all(Object.entries(result.files).map(async([name,url])=>{const r=await fetch(url);if(!r.ok)throw new Error('Prepared-file download expired or failed. Apply the mapping again.');return [name,await r.blob()];}));
+      if(epoch!==preparationEpoch)return;$("prep-downloads").replaceChildren();
+      for(const [name,blob] of loaded){download(name,blob,$("prep-downloads"));if(name==='preparation_audit.json')continue;
+        const id=name==='batch.json'?'manifest-file':name.replace('.csv','-file');const transfer=new DataTransfer();transfer.items.add(new File([blob],name,{type:blob.type}));$(id).files=transfer.files;
+      }
+      $("manifest-file").dispatchEvent(new Event('change'));$("mapping-verified").checked=false;$("condition-verified").checked=false;
+      const excluded=Object.entries(result.ignored_columns).filter(([,cols])=>cols.length).map(([name,cols])=>`${name}: ${cols.join(', ')}`).join('; ');
+      $("prep-status").textContent='Prepared files are loaded below. Confirm the experiment, then select Check data.'+(excluded?' Excluded columns: '+excluded:'');
+    }catch(e){error('prep-error',e.message);}finally{button.disabled=false;}
+  });
+  $("disconnect").addEventListener("click",()=>{clearPreparation();clearTimeout(timer);sessionStorage.removeItem(tokenKey);token="";$("admin-token").value="";$("workspace").hidden=true;$("connection-status").textContent="Disconnected. Running jobs continue on the worker.";});
   $("refresh-jobs").addEventListener("click",async()=>{try{await refresh();if(selected)await openJob(selected);}catch(e){error("connection-error",e.message);}});
   $("new-upload").addEventListener("click",()=>{clearTimeout(timer);selected=null;$("upload-panel").hidden=false;$("run-panel").hidden=true;$("run-name").focus();});
   $("manifest-file").addEventListener("change",async()=>{try{const m=JSON.parse(await $("manifest-file").files[0].text());$("material").value=m.condition?.material||"";$("fixture").value=m.condition?.fixture||"";$("speed").value=m.condition?.speed_in_min??"";$("mapping-verified").checked=false;$("condition-verified").checked=false;error("upload-error","");}catch{error("upload-error","Could not read batch.json. Choose a valid JSON settings file.");}});
