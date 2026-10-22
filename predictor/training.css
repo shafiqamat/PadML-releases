@@ -74,6 +74,7 @@
 /* Results */
 .training-page table.metrics th,.training-page table.metrics td {padding:.55rem .75rem;text-align:right;font-variant-numeric:tabular-nums}
 .training-page table.metrics th:first-child,.training-page table.metrics td:first-child {text-align:left}
+.training-page table.metrics th {white-space:normal}
 .training-page table.metrics th[scope=row] {background:none;font-weight:500;position:static}
 .training-page table.metrics caption {text-align:left;color:var(--muted);font-size:.875rem;padding:.5rem 0;caption-side:bottom}
 .download-links {display:flex;gap:.5rem 1rem;flex-wrap:wrap;margin:1rem 0}.download-links a {display:inline-flex;align-items:center}
