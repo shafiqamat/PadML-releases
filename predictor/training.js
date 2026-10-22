@@ -8,6 +8,8 @@
   const number=new Intl.NumberFormat(undefined,{maximumSignificantDigits:4}),kb=new Intl.NumberFormat(undefined,{maximumFractionDigits:1});
   const STATES={uploaded:['Uploaded',''],validating:['Validating','running'],validated:['Data checks passed','ok'],training:['Training','running'],
     complete:['Ready for review','ok'],publishing:['Publishing','running'],published:['Published','ok'],failed:['Failed','bad'],publish_failed:['Publish failed','bad'],archived:['Removed','']};
+  // Near-zero errors (e.g. synthetic exact fits) stay compact instead of printing fifteen zeros.
+  const metric=v=>v===0?'0':Math.abs(v)<1e-3?v.toExponential(2):number.format(v);
   const stateLabel=s=>(STATES[s]||[String(s).replaceAll('_',' ')])[0];
   const OUTPUTS={plateau_force_lbf:['Plateau force','lbf'],plateau_length_in:['Plateau length','in'],energy_in_lbf:['Absorbed energy','in·lbf']};
   let activityKey=null,activityStarted=0,activityTick=null;
@@ -113,7 +115,7 @@
   async function artifact(id,name){const info=await request(`jobs/${id}/artifacts/${name}`);const r=await timedFetch(info.download_url);if(!r.ok)throw new Error('Report download failed. Choose Refresh to retry.');return r;}
   function metricsTable(evaluation){const table=node('table',undefined,'metrics'),head=node('tr');['Output','Held-out MAE','R²','Mean-baseline MAE'].forEach(x=>{const th=node('th',x);th.scope='col';head.append(th);});table.append(head);
     Object.entries(evaluation.metrics||{}).forEach(([n,m])=>{const [label,unit]=OUTPUTS[n]||[n.replaceAll('_',' '),''],row=node('tr'),b=evaluation.mean_baseline?.[n]?.mae;
-      [`${label}${unit?` (${unit})`:''}`,number.format(m.mae),m.r2==null?'Not estimable':m.r2.toFixed(3),b==null?'See report':number.format(b)].forEach((x,i)=>{const cell=node(i?'td':'th',x);if(!i)cell.scope='row';row.append(cell);});table.append(row);});
+      [`${label}${unit?` (${unit})`:''}`,metric(m.mae),m.r2==null?'Not estimable':m.r2.toFixed(3),b==null?'See report':metric(b)].forEach((x,i)=>{const cell=node(i?'td':'th',x);if(!i)cell.scope='row';row.append(cell);});table.append(row);});
     table.append(node('caption','MAE is in each output’s unit. Lower is better; compare it with the mean baseline.'));return table;}
   async function openJob(id){clearTimeout(timer);const switched=selected!==id;if(switched){loaded=null;activity('job:'+id,'Loading this version…','Retrieving its current status and available results.');}selected=id;$('upload-panel').hidden=true;$('run-panel').hidden=false;error('run-error','');error('publish-error','');writeHash();
     const job=await request(`jobs/${id}`);if(selected!==id)return;if(job.state==='archived'){clearActivity();$('run-panel').hidden=true;selected=null;writeHash();await refresh();return;}
