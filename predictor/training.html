@@ -4,6 +4,10 @@
 <body class="training-page"><a class="skip-link" href="#training-main">Skip to workspace</a>
 <header class="topbar"><div class="brand"><p class="eyebrow">PadML / Experiments</p><h1>Campaign workspace</h1><p class="tagline">Your data, models and measured results—one version at a time.</p></div><a href="index.html" class="back-link">Open Predictor</a></header>
 <main id="training-main" class="training-main">
+<section id="activity-panel" class="activity-panel" aria-label="Workflow progress" hidden>
+<div class="activity-heading"><span id="activity-spinner" class="activity-spinner" aria-hidden="true"></span><h2 id="activity-title" role="status" aria-live="polite" aria-atomic="true"></h2><span id="activity-time"></span></div>
+<p id="activity-detail"></p><progress id="activity-progress" aria-label="Completed validation designs" hidden></progress><p id="activity-hint" class="hint"></p>
+</section>
 <ol class="workflow" aria-label="Workflow"><li>01 <span>Drop data</span></li><li>02 <span>Resolve questions</span></li><li>03 <span>Train and review</span></li><li>04 <span>Publish to Predictor</span></li></ol>
 <section class="connection"><h2>Connect to the team workspace</h2><form id="connect-form"><label for="admin-token">Team password</label><div class="connection-fields"><input id="admin-token" type="password" autocomplete="current-password" required><button class="primary">Connect</button></div></form><p id="connection-status" role="status"></p><p id="connection-error" class="error" role="alert" hidden></p></section>
 <div id="workspace" hidden><div class="campaign-toolbar"><div><label for="campaign-number">Campaign</label><input id="campaign-number" type="number" min="1" max="9999" value="3"></div><button id="refresh" type="button">Refresh</button><button id="new-upload" type="button">New upload</button><button id="disconnect" type="button">Disconnect</button></div>
