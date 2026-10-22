@@ -31,6 +31,11 @@
 .training-page .check-line input {flex:none;width:20px;height:20px;min-height:0;margin:.15rem 0 0;accent-color:var(--accent);cursor:pointer}
 .action-row {display:flex;align-items:center;gap:.5rem 1rem;flex-wrap:wrap;margin:.75rem 0}.action-row .hint {margin:0}
 
+.campaign-conditions {margin:.25rem 0 .75rem;font-variant-numeric:tabular-nums}.campaign-conditions strong {font-weight:600}
+.training-page .conditions-fields {border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:.5rem 1.25rem 1rem;margin:1.25rem 0}
+.conditions-fields legend {font-size:1rem;padding:0 .35rem}.conditions-fields .hint {margin:.25rem 0 0}
+.condition-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 1rem}
+
 /* Drop zone: the whole zone is the target; the native input stays keyboard-focusable. */
 .work-area .drop-zone input[type=file] {position:absolute;width:1px;height:1px;min-height:0;padding:0;border:0;opacity:0}
 .work-area .drop-zone {position:relative;display:flex;flex-direction:column;font-weight:400;align-items:center;gap:.35rem;border:2px dashed #aeb6c3;border-radius:var(--radius);padding:2rem 1rem;margin:1.25rem 0 .5rem;text-align:center;background:var(--bg);cursor:pointer;transition:border-color .15s ease,background-color .15s ease}
@@ -98,5 +103,5 @@
 @media (prefers-reduced-motion:reduce) {.activity-spinner {animation:none;border-right-color:var(--accent)}.training-page * {transition:none !important}}
 
 .training-page [hidden] {display:none !important}
-@media (max-width:850px) {.training-main {padding:1rem}.work-area,.connection {padding:1.2rem}.workflow {gap:1rem}.run-state {flex-direction:column;align-items:flex-start;gap:.3rem}.upload-grid {grid-template-columns:1fr}}
+@media (max-width:850px) {.training-main {padding:1rem}.work-area,.connection {padding:1.2rem}.workflow {gap:1rem}.run-state {flex-direction:column;align-items:flex-start;gap:.3rem}.upload-grid,.condition-grid {grid-template-columns:1fr}}
 @media (max-width:520px) {.connection-fields {flex-direction:column;align-items:stretch}.training-page .topbar {align-items:flex-start}.workflow {font-size:.85rem}.activity-panel.busy {top:.5rem}.activity-panel {padding:.8rem}.activity-heading h2 {font-size:1rem}#activity-time {width:100%;padding-left:2rem}.toolbar-spacer {display:none}}

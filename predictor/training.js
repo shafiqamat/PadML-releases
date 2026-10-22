@@ -2,7 +2,7 @@
 (() => {
   const $=id=>document.getElementById(id),node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   const config=window.PADML_CONFIG||{},base=String(config.trainingBase||config.apiBase||'').replace(/\/+$/,''),tokenKey=`padml-training-token:${base}`;
-  let token='',jobs=[],selected=null,timer=null,files=[],preparation=null,epoch=0,loaded=null,aiReady=false;
+  let token='',jobs=[],conditions=null,selected=null,timer=null,files=[],preparation=null,epoch=0,loaded=null,aiReady=false;
   const urls=[];const campaignNumber=()=>Number($('campaign-number').value),campaign=()=>`campaign${campaignNumber()}`;
   const campaignLabel=id=>String(id||'').replace(/^campaign/,'Campaign ');
   const number=new Intl.NumberFormat(undefined,{maximumSignificantDigits:4}),kb=new Intl.NumberFormat(undefined,{maximumFractionDigits:1});
@@ -45,6 +45,20 @@
   function updateBaseNote(){const j=jobs.find(j=>j.id===$('base-run').value);$('base-note').textContent=j?.condition_note||(j?'Only compatible family, variables and test conditions can be combined.':'');}
   $('base-run').addEventListener('change',updateBaseNote);
   async function refresh(){const response=await request('jobs');jobs=response.jobs;renderDashboard();}
+  // Material, fixture and speed are fixed per campaign: shown when known, entered once for a new campaign.
+  const conditionText=c=>`${c.material} · fixture: ${c.fixture} · ${c.speed_in_min} in/min · 0.8 in stroke`;
+  async function loadConditions(){const wanted=campaign();$('campaign-conditions').textContent='Loading test conditions…';
+    const response=await request(`campaigns/${wanted}`);if(wanted!==campaign())return;conditions=response.conditions;
+    $('campaign-conditions').replaceChildren();
+    if(conditions)$('campaign-conditions').append(node('strong','Test conditions: '),conditionText(conditions),node('span',' — data tested differently belongs in a different campaign.','hint'));
+    else $('campaign-conditions').append(node('strong','No test conditions yet. '),'The first dataset you upload sets them for the whole campaign.');
+    $('conditions-fields').hidden=Boolean(conditions);}
+  function enteredConditions(){const material=$('cond-material').value.trim(),fixture=$('cond-fixture').value.trim(),speed=Number($('cond-speed').value);
+    if(!material){$('cond-material').focus();throw new Error('Enter the campaign material.');}
+    if(!fixture){$('cond-fixture').focus();throw new Error('Enter the campaign fixture.');}
+    if(!(speed>0)){$('cond-speed').focus();throw new Error('Enter a positive test speed in in/min.');}
+    return {material,fixture,speed_in_min:speed};}
+  ['cond-material','cond-fixture','cond-speed'].forEach(id=>$(id).addEventListener('change',resetPreparation));
   function renderDashboard(){
     const active=jobs.filter(j=>(j.campaign_id||j.summary?.campaign_id||'campaign3')===campaign());
     $('campaign-title').textContent=`Campaign ${campaignNumber()}`;
@@ -63,14 +77,15 @@
   function showConnected(connected){$('connection').hidden=connected;$('workspace').hidden=!connected;}
   $('connect-form').addEventListener('submit',async e=>{e.preventDefault();token=$('admin-token').value;error('connection-error','');const b=e.submitter||$('connect-form').querySelector('button');b.disabled=true;activity('connect','Connecting to the workspace…','Loading campaign versions and checking AI availability.');
     try{const params=new URLSearchParams(location.hash.slice(1));if(Number(params.get('campaign'))>0)$('campaign-number').value=params.get('campaign');
-      await refresh();sessionStorage.setItem(tokenKey,token);showConnected(true);$('connection-status').textContent='';
+      await refresh();await loadConditions();sessionStorage.setItem(tokenKey,token);showConnected(true);$('connection-status').textContent='';
       const capability=await request('preparation');aiReady=capability.configured;$('analyze').disabled=!aiReady;$('prep-availability').textContent=aiReady?'GPT-6 Luna · medium reasoning':'AI preparation is unavailable: the OpenAI API key is not configured.';
       finishActivity('connect','Workspace connected','Choose a campaign and drop your experiment files to begin.');setStep('upload');
       const version=params.get('version');if(version&&jobs.some(j=>j.id===version)){await openJob(version);reveal('run-title');}
     }catch(err){error('connection-error',err.message);}finally{b.disabled=false;}});
   $('disconnect').addEventListener('click',()=>{clearTimeout(timer);clearActivity();resetPreparation();token='';selected=null;sessionStorage.removeItem(tokenKey);$('admin-token').value='';showConnected(false);$('connection-status').textContent='Disconnected.';history.replaceState(null,'',location.pathname);$('admin-token').focus();});
   $('refresh').addEventListener('click',async()=>{activity('refresh','Checking the latest status…','Contacting the workspace.');try{await refresh();if(selected)await openJob(selected);else finishActivity('refresh','Workspace updated','The latest campaign versions are shown below.');}catch(e){error('connection-error',e.message);}});
-  function showUpload(){clearTimeout(timer);clearActivity();selected=null;resetPreparation();renderDashboard();$('upload-panel').hidden=false;$('run-panel').hidden=true;setStep('upload');writeHash();}
+  function showUpload(){clearTimeout(timer);clearActivity();selected=null;resetPreparation();renderDashboard();$('upload-panel').hidden=false;$('run-panel').hidden=true;setStep('upload');writeHash();
+    loadConditions().catch(e=>error('connection-error',e.message));}
   $('campaign-number').addEventListener('change',()=>{if($('campaign-number').checkValidity())showUpload();});
   $('new-upload').addEventListener('click',()=>{showUpload();$('run-name').focus();});
   function renderPreparation(result){
@@ -83,7 +98,7 @@
     $('historical-confirm-line').hidden=!(ready&&jobs.find(j=>j.id===$('base-run').value)?.historical);
     $('answer-label').textContent=ready?'Corrections (optional)':'Your answers';$('answer').className=ready?'':'primary';$('answer').textContent=ready?'Send corrections to Luna':'Send answer to Luna';
     if(ready){const p=result.plan;summary.append(node('h4',`${result.summary.specimens} specimens · ${result.summary.designs} designs · ${number.format(result.summary.curve_points||0)} curve points`),
-      node('p',`${p.family} · ${p.material} · fixture: ${p.fixture} · ${p.speed_in_min} in/min · 0.8 in stroke`),node('p',`Inputs: ${p.variables.map(v=>`${v.name} (${v.unit})`).join(', ')}`));
+      node('p',`${p.family} · ${conditionText(result.summary.condition||p)}`),node('p',`Inputs: ${p.variables.map(v=>`${v.name} (${v.unit})`).join(', ')}`));
       if($('base-run').value)summary.append(node('p','Includes the selected earlier dataset. Only compatible mappings, material, fixture and test conditions can be combined.'));}
     setStep(ready?'train':'questions');
   }
@@ -92,8 +107,9 @@
       if(!preparation){
         if(!$('prep-consent').checked)throw new Error('Tick “Share these samples and notes with OpenAI” to continue.');
         if(!files.length||files.length>50||files.reduce((n,f)=>n+f.size,0)>64*1024*1024)throw new Error('Choose 1–50 files, at most 64 MB in total.');
+        const newConditions=conditions?null:enteredConditions();
         $('prep-status').textContent='Uploading your files to private storage…';
-        const upload=await request('smart/uploads',{campaign_id:campaign(),name:$('run-name').value.trim()||`Campaign ${campaignNumber()}`,base_id:$('base-run').value||null,notes:$('prep-notes').value,share_samples_with_openai:true,files:files.map(f=>({name:f.name,size:f.size}))});
+        const upload=await request('smart/uploads',{campaign_id:campaign(),...(newConditions?{conditions:newConditions}:{}),name:$('run-name').value.trim()||`Campaign ${campaignNumber()}`,base_id:$('base-run').value||null,notes:$('prep-notes').value,share_samples_with_openai:true,files:files.map(f=>({name:f.name,size:f.size}))});
         let uploaded=0;
         for(const post of upload.uploads){if(generation!==epoch)return;activity('prepare',`Uploading file ${uploaded+1} of ${upload.uploads.length}…`,post.name,{done:uploaded,total:upload.uploads.length});const form=new FormData();Object.entries(post.fields).forEach(([k,v])=>form.append(k,v));form.append('file',files.find(f=>f.name===post.name),post.name);const r=await timedFetch(post.url,{method:'POST',body:form});if(!r.ok)throw new Error('Upload failed. Select the files again to retry.');uploaded++;}
         if(generation!==epoch)return;preparation={id:upload.id};
@@ -111,7 +127,7 @@
   $('analyze').addEventListener('click',()=>analyze(''));
   $('answer').addEventListener('click',()=>{if(!$('prep-answer').value.trim()){error('prep-error','Type your answer or correction in the box above, then send it.');$('prep-answer').focus();return;}analyze($('prep-answer').value);});
   $('accept').addEventListener('click',async()=>{const historical=!$('historical-confirm-line').hidden;if(historical&&!$('historical-confirm').checked){error('prep-error','Tick the confirmation that the earlier dataset used the same mapping and test conditions.');$('historical-confirm').focus();return;}
-    const b=$('accept');b.disabled=true;b.textContent='Submitting…';activity('accept','Submitting your prepared dataset…','Saving the reviewed mapping and starting cloud validation.');try{const job=await request(`smart/${preparation.id}/accept`,{reviewed:true,historical_conditions_confirmed:historical&&$('historical-confirm').checked});await refresh();await openJob(job.id);reveal('run-title');}catch(e){error('prep-error',e.message);}finally{b.disabled=false;b.textContent='Use this prepared dataset';}});
+    const b=$('accept');b.disabled=true;b.textContent='Submitting…';activity('accept','Submitting your prepared dataset…','Saving the reviewed mapping and starting cloud validation.');try{const job=await request(`smart/${preparation.id}/accept`,{reviewed:true,historical_conditions_confirmed:historical&&$('historical-confirm').checked});await refresh();await loadConditions();await openJob(job.id);reveal('run-title');}catch(e){error('prep-error',e.message);}finally{b.disabled=false;b.textContent='Use this prepared dataset';}});
   async function artifact(id,name){const info=await request(`jobs/${id}/artifacts/${name}`);const r=await timedFetch(info.download_url);if(!r.ok)throw new Error('Report download failed. Choose Refresh to retry.');return r;}
   function metricsTable(evaluation){const table=node('table',undefined,'metrics'),head=node('tr');['Output','Held-out MAE','R²','Mean-baseline MAE'].forEach(x=>{const th=node('th',x);th.scope='col';head.append(th);});table.append(head);
     Object.entries(evaluation.metrics||{}).forEach(([n,m])=>{const [label,unit]=OUTPUTS[n]||[n.replaceAll('_',' '),''],row=node('tr'),b=evaluation.mean_baseline?.[n]?.mae;
