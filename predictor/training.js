@@ -68,7 +68,8 @@
       result.plan.warnings.forEach(w=>$('questions').append(node('p',w,'hint')));
       $('mapping-plan').textContent=JSON.stringify(result.plan,null,2);$('prepared-summary').replaceChildren();$('prep-answer').value='';
       if(result.summary){const p=result.plan;$('prepared-summary').append(node('h3',`${result.summary.specimens} specimens · ${result.summary.designs} designs`),node('p',`${p.family} · ${p.material} · fixture: ${p.fixture} · ${p.speed_in_min} in/min · 0.8 in stroke`),node('p',`Inputs: ${p.variables.map(v=>`${v.name} (${v.unit})`).join(', ')}`));
-        if($('base-run').value)$('prepared-summary').append(node('p','Includes the selected earlier dataset. By continuing you confirm its mapping and the same material, fixture and test conditions.'));
+        if($('base-run').value)$('prepared-summary').append(node('p','Includes the selected earlier dataset. Only compatible mappings, material, fixture and test conditions can be combined.'));
+        $('historical-confirm').checked=false;$('historical-confirm-line').hidden=!jobs.find(j=>j.id===$('base-run').value)?.historical;
         $('accept').hidden=false;$('prep-status').textContent='Dataset prepared. Review the summary, or send corrections below.';
       }else $('prep-status').textContent='Luna needs your answers before it can prepare the dataset.';
       finishActivity('prepare',result.summary?'Your prepared dataset is ready':'Luna needs your answers',result.summary?'Review the summary below, then choose “Use this prepared dataset”.':'Answer the questions in Luna’s data review below to continue.');
@@ -76,7 +77,8 @@
   }
   $('analyze').addEventListener('click',()=>analyze(''));
   $('answer').addEventListener('click',()=>{if(!$('prep-answer').value.trim()){error('prep-error','Enter an answer or correction.');return;}analyze($('prep-answer').value);});
-  $('accept').addEventListener('click',async()=>{const b=$('accept');b.disabled=true;activity('accept','Submitting your prepared dataset','Saving the reviewed mapping and starting cloud validation…');try{const job=await request(`smart/${preparation.id}/accept`,{reviewed:true});await refresh();await openJob(job.id);}catch(e){error('prep-error',e.message);}finally{b.disabled=false;}});
+  $('accept').addEventListener('click',async()=>{const historical=!$('historical-confirm-line').hidden;if(historical&&!$('historical-confirm').checked){error('prep-error','Confirm the earlier dataset’s mapping and test conditions first.');return;}
+    const b=$('accept');b.disabled=true;activity('accept','Submitting your prepared dataset','Saving the reviewed mapping and starting cloud validation…');try{const job=await request(`smart/${preparation.id}/accept`,{reviewed:true,historical_conditions_confirmed:historical&&$('historical-confirm').checked});await refresh();await openJob(job.id);}catch(e){error('prep-error',e.message);}finally{b.disabled=false;}});
   async function artifact(id,name){const info=await request(`jobs/${id}/artifacts/${name}`);const r=await timedFetch(info.download_url);if(!r.ok)throw new Error('Report download failed. Refresh to retry.');return r;}
   async function openJob(id){clearTimeout(timer);if(selected!==id){loaded=null;activity('job:'+id,'Loading this version','Retrieving its current status and available results…');}selected=id;$('upload-panel').hidden=true;$('run-panel').hidden=false;error('run-error','');
     const job=await request(`jobs/${id}`);if(selected!==id)return;if(job.state==='archived'){clearActivity();$('run-panel').hidden=true;await refresh();return;}
